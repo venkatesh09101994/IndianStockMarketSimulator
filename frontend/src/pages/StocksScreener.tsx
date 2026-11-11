@@ -16,6 +16,8 @@ export const StocksScreener: React.FC = () => {
   const [sortKey, setSortKey] = useState(SCR_CACHE.sortKey);
   const [loading, setLoading] = useState(true);
   const [orderStock, setOrderStock] = useState<any | null>(null);
+  const [onlineResults, setOnlineResults] = useState<any[]>([]);
+  const [onlineLoading, setOnlineLoading] = useState(false);
 
   const sectors = [
     'All',
@@ -49,6 +51,26 @@ export const StocksScreener: React.FC = () => {
     }, 60000);
     return () => clearInterval(interval);
   }, [search, selectedSector, sortKey]);
+
+  useEffect(() => {
+    if (!search || search.trim().length < 2) {
+      setOnlineResults([]);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        setOnlineLoading(true);
+        const res = await api.get(`/stocks/search/online?q=${encodeURIComponent(search.trim())}`);
+        if (!cancelled) setOnlineResults(res.data || []);
+      } catch (e) {
+        if (!cancelled) setOnlineResults([]);
+      } finally {
+        if (!cancelled) setOnlineLoading(false);
+      }
+    }, 400);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [search]);
 
   useEffect(() => { SCR_CACHE.search = search; }, [search]);
   useEffect(() => { SCR_CACHE.selectedSector = selectedSector; }, [selectedSector]);
@@ -239,6 +261,39 @@ export const StocksScreener: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {onlineResults.length > 0 && (
+        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm p-5 space-y-3">
+          <h3 className="font-bold text-sm text-slate-900">Online results (Yahoo Finance)</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {onlineResults.map((r) => (
+              <div key={r.yf_symbol} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <div>
+                  <p className="font-bold text-slate-900 text-xs">{r.symbol}</p>
+                  <p className="text-[11px] text-slate-400 truncate max-w-[220px]">{r.name} · {r.exchange}</p>
+                </div>
+                {r.in_db ? (
+                  <span className="text-[10px] font-bold text-emerald-600">Already added</span>
+                ) : (
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.post('/stocks/add', { symbol: r.yf_symbol });
+                        setOnlineResults((prev) => prev.map((x) => x.yf_symbol === r.yf_symbol ? { ...x, in_db: true } : x));
+                        fetchStocks();
+                      } catch (e) { console.error(e); }
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700"
+                  >
+                    Add
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          {onlineLoading && <p className="text-xs text-slate-400">Searching...</p>}
+        </div>
+      )}
 
       {orderStock && (
         <OrderModal

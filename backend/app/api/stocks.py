@@ -12,6 +12,7 @@ from app.schemas.stock import (
     MarketStatusOut, TickerItem
 )
 from app.services.market_clock import is_market_open, is_replay_mode, get_ist_now, get_market_status_details
+from app.services.stock_onboard import search_online, add_stock
 from app.providers import price_provider
 
 router = APIRouter(tags=['Stocks'])
@@ -112,6 +113,25 @@ def compare_stocks(symbols: str = Query('RELIANCE,TCS,INFY,HDFCBANK'), db: Sessi
         ))
     return results
 
+
+@router.get('/stocks/search/online')
+def search_stocks_online(q: str = Query(''), db: Session = Depends(get_db)):
+    results = search_online(q)
+    # annotate already in DB
+    existing = {s.yf_symbol for s in db.query(Stock.yf_symbol).all()}
+    for r in results:
+        r['in_db'] = r['yf_symbol'] in existing
+    return results
+
+@router.post('/stocks/add')
+def add_stock_endpoint(payload: dict, db: Session = Depends(get_db)):
+    symbol_input = (payload or {}).get('symbol', '').strip()
+    if not symbol_input:
+        raise HTTPException(status_code=400, detail='symbol required')
+    stock = add_stock(db, symbol_input)
+    if not stock:
+        raise HTTPException(status_code=400, detail='Could not add stock')
+    return {'symbol': stock.symbol, 'yf_symbol': stock.yf_symbol, 'company_name': stock.company_name, 'sector': stock.sector}
 
 @router.get('/stocks/{symbol}', response_model=StockDetail)
 def get_stock_detail(

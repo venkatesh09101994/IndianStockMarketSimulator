@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Any
 import yfinance as yf
+import pandas as pd
 from app.providers.base import PriceProvider
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,16 @@ class YFinanceProvider(PriceProvider):
 
             for sym in symbols:
                 try:
-                    df = data[sym] if len(symbols) > 1 else data
+                    if isinstance(data.columns, pd.MultiIndex):
+                        levels = data.columns.levels
+                        if sym in levels[0]:
+                            df = data[sym]
+                        elif sym in levels[1]:
+                            df = data.xs(sym, axis=1, level=1)
+                        else:
+                            df = data
+                    else:
+                        df = data
                     df = df.dropna(how="all")
                     if df.empty:
                         continue
@@ -113,6 +123,9 @@ class YFinanceProvider(PriceProvider):
             l52 = getattr(fast_info, "year_low", None) or info.get("fiftyTwoWeekLow")
 
             info_data = {
+                "name": info.get("longName") or info.get("shortName"),
+                "sector": info.get("sector"),
+                "industry": info.get("industry"),
                 "market_cap": int(mcap) if mcap and not math.isnan(mcap) else None,
                 "pe_ratio": round(float(pe), 2) if pe and not math.isnan(pe) else None,
                 "dividend_yield": round(float(div) * 100, 2) if div and not math.isnan(div) else None,
