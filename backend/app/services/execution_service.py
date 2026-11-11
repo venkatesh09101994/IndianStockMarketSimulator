@@ -9,6 +9,7 @@ from app.models.holding import Holding
 from app.models.position import Position
 from app.models.wallet import WalletTransaction
 from app.services.market_clock import get_ist_now
+from app.services.charges import compute_charges
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ def execute_order(db: Session, order: Order, fill_price: int, reason: str = 'USE
     now_utc = datetime.now(timezone.utc)
     today_ist = get_ist_now().strftime('%Y-%m-%d')
     realized_pnl = None
+    leg_charges = 0
 
     if order.product_type == 'CNC':
         if order.side == 'BUY':
@@ -37,18 +39,29 @@ def execute_order(db: Session, order: Order, fill_price: int, reason: str = 'USE
                 ))
                 order.blocked_amount = 0
 
-            if account.cash_balance < trade_value:
-                raise ValueError(f'Insufficient funds: required Rs {trade_value/100:.2f}, available Rs {account.cash_balance/100:.2f}')
+            charges = compute_charges('BUY', 'CNC', order.quantity, fill_price)
+            leg_charges = charges
+            if account.cash_balance < trade_value + charges:
+                raise ValueError(f'Insufficient funds: required Rs {(trade_value+charges)/100:.2f}, available Rs {account.cash_balance/100:.2f}')
 
-            account.cash_balance -= trade_value
+            account.cash_balance -= trade_value + charges
             db.add(WalletTransaction(
                 user_id=user_id,
                 type='BUY',
                 amount=-trade_value,
-                balance_after=account.cash_balance,
+                balance_after=account.cash_balance + charges,
                 ref_order_id=order.id,
                 note=f'Bought {order.quantity} shares of {order.stock.symbol} @ Rs {fill_price/100:.2f}'
             ))
+            if charges > 0:
+                db.add(WalletTransaction(
+                    user_id=user_id,
+                    type='FEE',
+                    amount=-charges,
+                    balance_after=account.cash_balance,
+                    ref_order_id=order.id,
+                    note=f'Charges for order #{order.id}: Rs {charges/100:.2f}'
+                ))
 
             holding = db.query(Holding).filter(Holding.user_id == user_id, Holding.stock_id == order.stock_id).first()
             if holding:
@@ -71,18 +84,29 @@ def execute_order(db: Session, order: Order, fill_price: int, reason: str = 'USE
             if not holding or holding.quantity < order.quantity:
                 raise ValueError('Insufficient holdings to execute CNC SELL')
 
-            account.cash_balance += trade_value
-            realized_pnl = (fill_price - holding.avg_buy_price) * order.quantity
+            charges = compute_charges('SELL', 'CNC', order.quantity, fill_price)
+            leg_charges = charges
+            account.cash_balance += trade_value - charges
+            realized_pnl = (fill_price - holding.avg_buy_price) * order.quantity - charges
             account.realized_pnl_total += realized_pnl
 
             db.add(WalletTransaction(
                 user_id=user_id,
                 type='SELL',
                 amount=trade_value,
-                balance_after=account.cash_balance,
+                balance_after=account.cash_balance + charges,
                 ref_order_id=order.id,
                 note=f'Sold {order.quantity} shares of {order.stock.symbol} @ Rs {fill_price/100:.2f}'
             ))
+            if charges > 0:
+                db.add(WalletTransaction(
+                    user_id=user_id,
+                    type='FEE',
+                    amount=-charges,
+                    balance_after=account.cash_balance,
+                    ref_order_id=order.id,
+                    note=f'Charges for order #{order.id}: Rs {charges/100:.2f}'
+                ))
 
             if holding.quantity == order.quantity:
                 db.delete(holding)
@@ -138,22 +162,25 @@ def execute_order(db: Session, order: Order, fill_price: int, reason: str = 'USE
         if closing_qty > 0:
             if current_qty > 0:
                 pnl = (fill_price - position.avg_price) * closing_qty
+                closing_side = 'SELL'
             else:
                 pnl = (position.avg_price - fill_price) * closing_qty
-
-            realized_pnl = pnl
-            position.realized_pnl += pnl
-            account.realized_pnl_total += pnl
+                closing_side = 'BUY'
+            charges_close = compute_charges(closing_side, 'MIS', closing_qty, fill_price)
+            leg_charges += charges_close
+            realized_pnl = pnl - charges_close
+            position.realized_pnl += realized_pnl
+            account.realized_pnl_total += realized_pnl
 
             released_margin = int(round(position.margin_blocked * (closing_qty / abs(current_qty))))
             position.margin_blocked -= released_margin
-            account.cash_balance += released_margin + pnl
+            account.cash_balance += released_margin + pnl - charges_close
 
             db.add(WalletTransaction(
                 user_id=user_id,
                 type='MARGIN_RELEASE',
                 amount=released_margin,
-                balance_after=account.cash_balance - pnl,
+                balance_after=account.cash_balance - pnl + charges_close,
                 ref_order_id=order.id,
                 note=f'Released margin for {closing_qty} {order.stock.symbol}'
             ))
@@ -161,27 +188,47 @@ def execute_order(db: Session, order: Order, fill_price: int, reason: str = 'USE
                 user_id=user_id,
                 type='PNL_INTRADAY',
                 amount=pnl,
-                balance_after=account.cash_balance,
+                balance_after=account.cash_balance + charges_close,
                 ref_order_id=order.id,
                 note=f'Intraday P&L for {order.stock.symbol}: Rs {pnl/100:.2f}'
             ))
+            if charges_close > 0:
+                db.add(WalletTransaction(
+                    user_id=user_id,
+                    type='FEE',
+                    amount=-charges_close,
+                    balance_after=account.cash_balance,
+                    ref_order_id=order.id,
+                    note=f'Charges for order #{order.id}: Rs {charges_close/100:.2f}'
+                ))
 
         if opening_qty > 0:
             req_margin = int(round(opening_qty * fill_price * (settings.MIS_MARGIN_PERCENT / 100.0)))
-            if account.cash_balance < req_margin:
-                raise ValueError(f'Insufficient cash for margin: required Rs {req_margin/100:.2f}, available Rs {account.cash_balance/100:.2f}')
+            charges_open = compute_charges(order.side, 'MIS', opening_qty, fill_price)
+            leg_charges += charges_open
+            if account.cash_balance < req_margin + charges_open:
+                raise ValueError(f'Insufficient cash for margin: required Rs {(req_margin+charges_open)/100:.2f}, available Rs {account.cash_balance/100:.2f}')
 
-            account.cash_balance -= req_margin
+            account.cash_balance -= req_margin + charges_open
             position.margin_blocked += req_margin
 
             db.add(WalletTransaction(
                 user_id=user_id,
                 type='MARGIN_BLOCK',
                 amount=-req_margin,
-                balance_after=account.cash_balance,
+                balance_after=account.cash_balance + charges_open,
                 ref_order_id=order.id,
                 note=f'Blocked margin for {opening_qty} {order.stock.symbol}'
             ))
+            if charges_open > 0:
+                db.add(WalletTransaction(
+                    user_id=user_id,
+                    type='FEE',
+                    amount=-charges_open,
+                    balance_after=account.cash_balance,
+                    ref_order_id=order.id,
+                    note=f'Charges for order #{order.id}: Rs {charges_open/100:.2f}'
+                ))
 
             if closing_qty > 0:
                 position.avg_price = fill_price
@@ -198,16 +245,7 @@ def execute_order(db: Session, order: Order, fill_price: int, reason: str = 'USE
             position.is_open = True
             position.closed_at = None
 
-    if settings.FLAT_FEE_PAISE > 0:
-        account.cash_balance -= settings.FLAT_FEE_PAISE
-        db.add(WalletTransaction(
-            user_id=user_id,
-            type='FEE',
-            amount=-settings.FLAT_FEE_PAISE,
-            balance_after=account.cash_balance,
-            ref_order_id=order.id,
-            note=f'Brokerage fee for order #{order.id}'
-        ))
+    # Flat brokerage fee is already included in compute_charges() above (when FLAT_FEE_PAISE > 0).
 
     order.status = 'EXECUTED'
     order.filled_quantity = order.quantity
@@ -222,6 +260,7 @@ def execute_order(db: Session, order: Order, fill_price: int, reason: str = 'USE
         quantity=order.quantity,
         price=fill_price,
         total_value=trade_value,
+        charges=leg_charges,
         realized_pnl=realized_pnl,
         reason=reason,
         executed_at=now_utc

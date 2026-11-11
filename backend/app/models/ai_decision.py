@@ -15,6 +15,9 @@ class AIDecision(Base):
     reasoning = Column(Text, default='')
     model = Column(String(100), default='')
     executed = Column(Integer, default=0)  # 0/1
+    dry_run = Column(Integer, default=0)  # 0/1
+    scheduled = Column(Integer, default=0)  # 0/1 (auto-trader)
+    guardrail_note = Column(String(255), nullable=True)
     order_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

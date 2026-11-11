@@ -12,9 +12,18 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 
 from app.config import settings as _cfg
-LLM_BASE_URL = _cfg.LLM_BASE_URL
-LLM_API_KEY = _cfg.LLM_API_KEY
-LLM_MODEL = _cfg.LLM_MODEL
+
+def _llm(db=None):
+    if db is not None:
+        try:
+            from app.services.ai_config import get_llm_config
+            c = get_llm_config(db)
+            return c['base_url'], c['api_key'], c['model']
+        except Exception:
+            pass
+    return _cfg.LLM_BASE_URL, _cfg.LLM_API_KEY, _cfg.LLM_MODEL
+
+LLM_BASE_URL, LLM_API_KEY, LLM_MODEL = _llm()
 
 def _get_quote_and_history(db: Session, symbol: str) -> Optional[Dict[str, Any]]:
     stock = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
@@ -115,14 +124,15 @@ def analyze(db: Session, user: User, symbol: str) -> Dict[str, Any]:
     holdings_qty = h.quantity if h else 0
     cash = user.account.cash_balance / 100.0 if user.account else 0.0
 
+    base_url, api_key, model = _llm(db)
     prompt = _build_prompt(ctx, cash, holdings_qty, memory_context, graph_context)
 
     try:
         resp = requests.post(
-            f"{LLM_BASE_URL.rstrip('/')}/chat/completions",
-            headers={'Authorization': f'Bearer {LLM_API_KEY}', 'Content-Type': 'application/json'},
+            f"{base_url.rstrip('/')}/chat/completions",
+            headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
             json={
-                'model': LLM_MODEL,
+                'model': model,
                 'messages': [{'role': 'user', 'content': prompt}],
                 'temperature': 0.2,
             },
@@ -139,7 +149,7 @@ def analyze(db: Session, user: User, symbol: str) -> Dict[str, Any]:
         decision = json.loads(content)
     except Exception as e:
         logger.exception('LLM call failed')
-        return {'error': f'LLM error: {e}', 'model': LLM_MODEL}
+        return {'error': f'LLM error: {e}', 'model': model}
 
     action = str(decision.get('action', 'HOLD')).upper()
     if action not in ('BUY', 'SELL', 'HOLD'):
@@ -169,7 +179,7 @@ def analyze(db: Session, user: User, symbol: str) -> Dict[str, Any]:
         quantity=quantity,
         confidence=confidence,
         reasoning=reasoning,
-        model=LLM_MODEL,
+        model=model,
         executed=0,
     )
     db.add(row)
@@ -183,7 +193,7 @@ def analyze(db: Session, user: User, symbol: str) -> Dict[str, Any]:
         'quantity': quantity,
         'confidence': confidence,
         'reasoning': reasoning,
-        'model': LLM_MODEL,
+        'model': model,
         'context': ctx,
         'memory_context': memory_context,
         'graph_context': graph_context,

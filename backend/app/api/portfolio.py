@@ -43,6 +43,7 @@ def trades(db: Session = Depends(get_db), current_user: User = Depends(get_curre
             quantity=t.quantity,
             price=round(t.price / 100.0, 2),
             total_value=round(t.total_value / 100.0, 2),
+            charges=round((t.charges or 0) / 100.0, 2),
             realized_pnl=round(t.realized_pnl / 100.0, 2) if t.realized_pnl is not None else None,
             reason=t.reason,
             executed_at=t.executed_at

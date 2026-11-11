@@ -11,6 +11,7 @@ from app.services.market_clock import is_market_open, is_replay_mode
 from app.services.order_engine import run_order_engine
 from app.services.square_off import square_off_mis_positions
 from app.services.snapshot_service import take_daily_snapshots
+from app.services.ai_auto_trader import run_auto_trader
 
 logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler(timezone='Asia/Kolkata')
@@ -86,6 +87,16 @@ def job_snapshots():
     finally:
         db.close()
 
+def job_ai_auto_trader():
+    db = SessionLocal()
+    try:
+        if is_market_open(db) or is_replay_mode(db):
+            run_auto_trader(db)
+    except Exception as e:
+        logger.error(f'Error in job_ai_auto_trader: {e}')
+    finally:
+        db.close()
+
 def start_scheduler():
     # 1. Refresh quotes every PRICE_REFRESH_SECONDS
     scheduler.add_job(
@@ -116,6 +127,14 @@ def start_scheduler():
         job_snapshots,
         trigger=CronTrigger(day_of_week='mon-fri', hour=15, minute=35),
         id='daily_snapshot',
+        replace_existing=True
+    )
+
+    # 5. AI auto-trader every 5 minutes during market hours
+    scheduler.add_job(
+        job_ai_auto_trader,
+        trigger=IntervalTrigger(minutes=5),
+        id='ai_auto_trader',
         replace_existing=True
     )
 

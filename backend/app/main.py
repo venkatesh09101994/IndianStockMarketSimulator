@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from app.config import settings
 from app.db import engine, Base, SessionLocal
+from app.db_migrate import run_migrations
 from app.api import api_router
 from app.seed.seeder import seed_database
 from app.jobs.scheduler import start_scheduler, scheduler
@@ -28,7 +29,12 @@ async def lifespan(app: FastAPI):
     logger.info('Initializing Indian Stock Market Simulator Backend...')
     # Create DB tables
     Base.metadata.create_all(bind=engine)
-    
+    # Lightweight migrations for older DBs
+    try:
+        run_migrations()
+    except Exception as e:
+        logger.warning(f'Migration step failed: {e}')
+
     # Seed database
     db = SessionLocal()
     try:

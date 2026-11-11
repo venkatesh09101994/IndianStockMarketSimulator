@@ -11,13 +11,30 @@ logger = logging.getLogger(__name__)
 
 def square_off_mis_positions(db: Session):
     logger.info('Starting automated MIS square-off...')
+    from app.models.account import Account
+    from app.models.wallet import WalletTransaction
     pending_mis = db.query(Order).filter(
         Order.product_type == 'MIS',
         Order.status == 'PENDING'
     ).all()
     for o in pending_mis:
+        if o.blocked_amount and o.blocked_amount > 0:
+            acc = db.query(Account).filter(Account.user_id == o.user_id).first()
+            if acc:
+                acc.cash_balance += o.blocked_amount
+                db.add(WalletTransaction(
+                    user_id=o.user_id,
+                    type='ORDER_RELEASE',
+                    amount=o.blocked_amount,
+                    balance_after=acc.cash_balance,
+                    ref_order_id=o.id,
+                    note=f'Released blocked funds on auto square-off cancel #{o.id}'
+                ))
+            o.blocked_amount = 0
         o.status = 'CANCELLED'
         o.reject_reason = 'Auto square-off cancellation'
+
+    db.commit()
 
     open_positions = db.query(Position).filter(
         Position.is_open == True,

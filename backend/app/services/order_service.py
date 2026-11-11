@@ -10,6 +10,7 @@ from app.models.wallet import WalletTransaction
 from app.schemas.order import OrderCreate
 from app.services.market_clock import is_market_open, is_mis_allowed, is_replay_mode
 from app.services.execution_service import execute_order
+from app.services.charges import compute_charges
 
 def place_order(db: Session, user_id: int, order_in: OrderCreate) -> Order:
     stock = db.query(Stock).filter(Stock.symbol == order_in.symbol, Stock.is_active == True).first()
@@ -65,18 +66,22 @@ def place_order(db: Session, user_id: int, order_in: OrderCreate) -> Order:
     blocked_amount = 0
 
     if order_in.product_type == 'CNC' and order_in.side == 'BUY':
-        if account.cash_balance < total_val:
-            raise ValueError(f'Insufficient cash: required Rs {total_val/100:.2f}, available Rs {account.cash_balance/100:.2f}')
+        est_charges = compute_charges('BUY', 'CNC', order_in.quantity, est_price)
+        total_needed = total_val + est_charges
+        if account.cash_balance < total_needed:
+            raise ValueError(f'Insufficient cash: required Rs {total_needed/100:.2f} (incl. charges), available Rs {account.cash_balance/100:.2f}')
         if order_in.order_type in ['LIMIT', 'SL_M']:
-            blocked_amount = total_val
+            blocked_amount = total_val + est_charges
             account.cash_balance -= blocked_amount
 
     elif order_in.product_type == 'MIS':
         req_margin = int(round(total_val * (settings.MIS_MARGIN_PERCENT / 100.0)))
-        if account.cash_balance < req_margin:
-            raise ValueError(f'Insufficient cash for margin: required Rs {req_margin/100:.2f}, available Rs {account.cash_balance/100:.2f}')
+        est_charges = compute_charges(order_in.side, 'MIS', order_in.quantity, est_price)
+        total_needed = req_margin + est_charges
+        if account.cash_balance < total_needed:
+            raise ValueError(f'Insufficient cash for margin: required Rs {total_needed/100:.2f} (incl. charges), available Rs {account.cash_balance/100:.2f}')
         if order_in.order_type in ['LIMIT', 'SL_M']:
-            blocked_amount = req_margin
+            blocked_amount = req_margin + est_charges
             account.cash_balance -= blocked_amount
 
     order = Order(

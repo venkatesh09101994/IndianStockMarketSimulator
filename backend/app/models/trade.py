@@ -16,6 +16,7 @@ class Trade(Base):
     quantity = Column(Integer, nullable=False)
     price = Column(BigInteger, nullable=False)  # paise
     total_value = Column(BigInteger, nullable=False)  # paise
+    charges = Column(BigInteger, nullable=False, default=0)  # paise (brokerage + taxes + fees)
     realized_pnl = Column(BigInteger, nullable=True)  # paise
     reason = Column(String(30), default='USER', nullable=False)  # USER | LIMIT_HIT | SL_HIT | SQUARE_OFF | GAP_FILL
     executed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

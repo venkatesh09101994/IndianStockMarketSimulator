@@ -45,6 +45,7 @@ class TradeOut(BaseModel):
     quantity: int
     price: float
     total_value: float
+    charges: float = 0.0
     realized_pnl: Optional[float] = None
     reason: str
     executed_at: datetime
