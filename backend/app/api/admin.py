@@ -10,6 +10,8 @@ from app.models.holding import Holding
 from app.models.position import Position
 from app.models.wallet import WalletTransaction
 from app.models.snapshot import PortfolioSnapshot
+from app.models.watchlist import WatchlistItem
+from app.models.ai_decision import AIDecision
 from app.models.app_state import AppState
 from app.schemas.admin import AccountResetResponse
 
@@ -43,6 +45,8 @@ def reset_user_account(db: Session = Depends(get_db), current_user: User = Depen
     db.query(Position).filter(Position.user_id == uid).delete()
     db.query(WalletTransaction).filter(WalletTransaction.user_id == uid).delete()
     db.query(PortfolioSnapshot).filter(PortfolioSnapshot.user_id == uid).delete()
+    db.query(WatchlistItem).filter(WatchlistItem.user_id == uid).delete()
+    db.query(AIDecision).filter(AIDecision.user_id == uid).delete()
 
     acc = db.query(Account).filter(Account.user_id == uid).first()
     if acc:
