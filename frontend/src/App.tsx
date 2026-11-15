@@ -12,6 +12,7 @@ import { Insights } from './pages/Insights';
 import { Settings } from './pages/Settings';
 import { AITrader } from './pages/AITrader';
 import { KnowledgeGraph } from './pages/KnowledgeGraph';
+import { Backtest } from './pages/Backtest';
 import { useAuthStore } from './store/useAuthStore';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -63,6 +64,7 @@ export const App: React.FC = () => {
           <Route path="settings" element={<Settings />} />
           <Route path="ai-trader" element={<AITrader />} />
           <Route path="knowledge-graph" element={<KnowledgeGraph />} />
+          <Route path="backtest" element={<Backtest />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
