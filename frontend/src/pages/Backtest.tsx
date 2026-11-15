@@ -39,28 +39,51 @@ export const Backtest: React.FC = () => {
 
       <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-sm space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <input className="px-3 py-2 rounded-xl border border-slate-200 text-xs" placeholder="Symbol" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} />
-          <select className="px-3 py-2 rounded-xl border border-slate-200 text-xs" value={strategy} onChange={(e) => setStrategy(e.target.value)}>
-            <option value="buy_hold">Buy & Hold</option>
-            <option value="sma_crossover">SMA Crossover</option>
-            <option value="rsi">RSI</option>
-          </select>
-          <input className="px-3 py-2 rounded-xl border border-slate-200 text-xs" type="number" placeholder="Days" value={days} onChange={(e) => setDays(Number(e.target.value))} />
-          <button onClick={run} disabled={loading} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 disabled:opacity-50">
-            {loading ? 'Running...' : 'Run Backtest'}
-          </button>
+          <div>
+            <label className="text-[11px] font-bold text-slate-500 mb-1 block">Symbol</label>
+            <input className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs" placeholder="RELIANCE" value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} />
+          </div>
+          <div>
+            <label className="text-[11px] font-bold text-slate-500 mb-1 block">Strategy</label>
+            <select className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs" value={strategy} onChange={(e) => setStrategy(e.target.value)}>
+              <option value="buy_hold">Buy &amp; Hold</option>
+              <option value="sma_crossover">SMA Crossover</option>
+              <option value="rsi">RSI</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-[11px] font-bold text-slate-500 mb-1 block">Period (days)</label>
+            <input className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs" type="number" placeholder="252" value={days} onChange={(e) => setDays(Number(e.target.value))} />
+          </div>
+          <div className="flex items-end">
+            <button onClick={run} disabled={loading} className="w-full px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 disabled:opacity-50">
+              {loading ? 'Running...' : 'Run Backtest'}
+            </button>
+          </div>
         </div>
 
         {strategy === 'sma_crossover' && (
           <div className="grid grid-cols-2 gap-3">
-            <input className="px-3 py-2 rounded-xl border border-slate-200 text-xs" type="number" placeholder="Fast SMA" value={fast} onChange={(e) => setFast(Number(e.target.value))} />
-            <input className="px-3 py-2 rounded-xl border border-slate-200 text-xs" type="number" placeholder="Slow SMA" value={slow} onChange={(e) => setSlow(Number(e.target.value))} />
+            <div>
+              <label className="text-[11px] font-bold text-slate-500 mb-1 block">Fast SMA (days)</label>
+              <input className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs" type="number" value={fast} onChange={(e) => setFast(Number(e.target.value))} />
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-slate-500 mb-1 block">Slow SMA (days)</label>
+              <input className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs" type="number" value={slow} onChange={(e) => setSlow(Number(e.target.value))} />
+            </div>
           </div>
         )}
         {strategy === 'rsi' && (
           <div className="grid grid-cols-2 gap-3">
-            <input className="px-3 py-2 rounded-xl border border-slate-200 text-xs" type="number" placeholder="RSI Buy Below" value={rsiBuy} onChange={(e) => setRsiBuy(Number(e.target.value))} />
-            <input className="px-3 py-2 rounded-xl border border-slate-200 text-xs" type="number" placeholder="RSI Sell Above" value={rsiSell} onChange={(e) => setRsiSell(Number(e.target.value))} />
+            <div>
+              <label className="text-[11px] font-bold text-slate-500 mb-1 block">RSI Buy Below</label>
+              <input className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs" type="number" value={rsiBuy} onChange={(e) => setRsiBuy(Number(e.target.value))} />
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-slate-500 mb-1 block">RSI Sell Above</label>
+              <input className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs" type="number" value={rsiSell} onChange={(e) => setRsiSell(Number(e.target.value))} />
+            </div>
           </div>
         )}
         {msg && <p className="text-xs text-rose-600">{msg}</p>}

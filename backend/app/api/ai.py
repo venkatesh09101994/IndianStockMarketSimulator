@@ -4,6 +4,7 @@ from app.api.deps import get_db, get_current_user
 from app.models.user import User
 from app.models.ai_decision import AIDecision
 from app.services.ai_trader import analyze, execute_decision
+from app.services.multi_agent import debate as multi_debate
 from app.services.ai_config import get_llm_config, set_llm_config, get_ai_config, set_ai_config
 import requests
 import os
@@ -84,6 +85,55 @@ def test_connection(payload: dict = None, db: Session = Depends(get_db)):
         return {'reachable': ok, 'models': models, 'base_url': base_url, 'model': model}
     except Exception as e:
         return {'reachable': False, 'error': str(e), 'base_url': base_url, 'model': model}
+
+@router.post('/debate')
+def debate_endpoint(payload: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    symbol = (payload or {}).get('symbol', '').strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=400, detail='symbol required')
+    return multi_debate(db, current_user, symbol)
+
+@router.post('/evaluate')
+def evaluate_outcomes(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # mark was_correct for executed decisions that have a realized pnl
+    from app.models.trade import Trade
+    from app.models.ai_decision import AIDecision
+    rows = db.query(AIDecision).filter(AIDecision.user_id == current_user.id, AIDecision.executed == 1).all()
+    updated = 0
+    for r in rows:
+        if r.was_correct is not None:
+            continue
+        if not r.order_id:
+            continue
+        trade = db.query(Trade).filter(Trade.order_id == r.order_id).first()
+        if not trade or trade.realized_pnl is None:
+            continue
+        pnl = trade.realized_pnl
+        if r.action == 'BUY':
+            correct = 1 if pnl > 0 else 0
+        elif r.action == 'SELL':
+            correct = 1 if pnl > 0 else 0
+        else:
+            continue
+        r.was_correct = correct
+        r.outcome_pnl = pnl
+        updated += 1
+    db.commit()
+    return {'updated': updated}
+
+@router.get('/accuracy')
+def accuracy(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    from app.models.ai_decision import AIDecision
+    rows = db.query(AIDecision).filter(AIDecision.user_id == current_user.id, AIDecision.executed == 1).all()
+    total = len(rows)
+    evaluated = [r for r in rows if r.was_correct is not None]
+    correct = sum(1 for r in evaluated if r.was_correct == 1)
+    return {
+        'total_executed': total,
+        'evaluated': len(evaluated),
+        'correct': correct,
+        'accuracy_pct': round(correct / len(evaluated) * 100.0, 2) if evaluated else 0.0,
+    }
 
 @router.get('/status')
 def status(db: Session = Depends(get_db)):

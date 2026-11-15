@@ -10,6 +10,9 @@ _ADDITIONS = {
         ('dry_run', 'INTEGER NOT NULL DEFAULT 0'),
         ('scheduled', 'INTEGER NOT NULL DEFAULT 0'),
         ('guardrail_note', 'VARCHAR(255)'),
+        ('debate_transcript', 'TEXT'),
+        ('was_correct', 'INTEGER'),
+        ('outcome_pnl', 'BIGINT'),
     ],
 }
 
