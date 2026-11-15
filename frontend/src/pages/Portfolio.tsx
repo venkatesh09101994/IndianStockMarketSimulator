@@ -57,6 +57,20 @@ export const Portfolio: React.FC = () => {
 
   const COLORS = ['#18181b', '#10b981', '#f59e0b', '#0ea5e9', '#ec4899', '#6366f1', '#64748b'];
 
+  const download = async (path: string, filename: string) => {
+    try {
+      const res = await api.get(path, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) { console.error(e); }
+  };
+
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
@@ -143,7 +157,8 @@ export const Portfolio: React.FC = () => {
       </div>
 
       {/* Tabs Bar */}
-      <div className="flex items-center gap-2 border-b border-slate-200/80 pb-2">
+      <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
+        <div className="flex items-center gap-2">
         <button
           onClick={() => setActiveTab('holdings')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
@@ -184,6 +199,11 @@ export const Portfolio: React.FC = () => {
         >
           Sector Allocation
         </button>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => download('/portfolio/export/holdings', 'holdings.csv')} className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200">Export Holdings CSV</button>
+          <button onClick={() => download('/portfolio/export/trades', 'trades.csv')} className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200">Export Trades CSV</button>
+        </div>
       </div>
 
       {/* Tab 1: Holdings Table */}

@@ -1,6 +1,8 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+import csv, io
 from app.api.deps import get_db, get_current_user
 from app.models.user import User
 from app.models.trade import Trade
@@ -86,3 +88,32 @@ def wallet_history(db: Session = Depends(get_db), current_user: User = Depends(g
         )
         for t in txs
     ]
+
+
+@router.get('/export/trades')
+def export_trades(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    trades = db.query(Trade).filter(Trade.user_id == current_user.id).order_by(Trade.id.desc()).all()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(['id', 'order_id', 'symbol', 'side', 'product_type', 'quantity', 'price', 'total_value', 'charges', 'realized_pnl', 'reason', 'executed_at'])
+    for t in trades:
+        w.writerow([
+            t.id, t.order_id, t.stock.symbol, t.side, t.product_type, t.quantity,
+            round(t.price / 100.0, 2), round(t.total_value / 100.0, 2), round((t.charges or 0) / 100.0, 2),
+            (round(t.realized_pnl / 100.0, 2) if t.realized_pnl is not None else ''),
+            t.reason, t.executed_at.isoformat() if t.executed_at else '',
+        ])
+    buf.seek(0)
+    return StreamingResponse(iter([buf.getvalue()]), media_type='text/csv', headers={'Content-Disposition': 'attachment; filename="trades.csv"'})
+
+@router.get('/export/holdings')
+def export_holdings(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    from app.models.holding import Holding as H
+    holdings = db.query(H).filter(H.user_id == current_user.id).all()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(['symbol', 'company_name', 'quantity', 'avg_buy_price', 'sector'])
+    for h in holdings:
+        w.writerow([h.stock.symbol, h.stock.company_name, h.quantity, round(h.avg_buy_price / 100.0, 2), h.stock.sector])
+    buf.seek(0)
+    return StreamingResponse(iter([buf.getvalue()]), media_type='text/csv', headers={'Content-Disposition': 'attachment; filename="holdings.csv"'})

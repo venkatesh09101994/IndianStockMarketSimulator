@@ -10,6 +10,9 @@ interface Decision {
   reasoning: string;
   model: string;
   executed: boolean;
+  dry_run?: boolean;
+  scheduled?: boolean;
+  guardrail_note?: string | null;
   order_id?: number;
   created_at?: string;
   context?: any;
@@ -289,6 +292,37 @@ export const AITrader: React.FC = () => {
                 <div className="text-[10px] text-slate-400 font-bold uppercase mb-1.5">AI Reasoning</div>
                 <p className="text-slate-700 text-sm leading-relaxed">{decision.reasoning}</p>
               </div>
+              {/* Explainability card */}
+              <div className="bg-white/70 rounded-xl p-4 mb-4 border border-slate-200/60 space-y-2">
+                <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">Explainability</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                  <div className="bg-slate-50 rounded-lg p-2">
+                    <div className="text-slate-400 text-[10px] font-bold uppercase">Action</div>
+                    <div className={`font-black ${actionColor(decision.action)}`}>{decision.action}</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-2">
+                    <div className="text-slate-400 text-[10px] font-bold uppercase">Quantity</div>
+                    <div className="font-black text-slate-900 font-mono">{decision.quantity}</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-2">
+                    <div className="text-slate-400 text-[10px] font-bold uppercase">Confidence</div>
+                    <div className="font-black text-slate-900 font-mono">{(decision.confidence * 100).toFixed(0)}%</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-2">
+                    <div className="text-slate-400 text-[10px] font-bold uppercase">Origin</div>
+                    <div className="font-black text-slate-900">{decision.scheduled ? (decision.dry_run ? 'Auto (dry-run)' : 'Auto') : 'Manual'}</div>
+                  </div>
+                </div>
+                {decision.guardrail_note && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-amber-800 text-xs">
+                    <span className="font-bold">Guardrail: </span>{decision.guardrail_note}
+                  </div>
+                )}
+                <div className="text-[10px] text-slate-400">
+                  Risk rules: max 20% of cash per trade · whole shares only · confidence threshold for auto-trader.
+                </div>
+              </div>
+
               {(decision.memory_context || decision.graph_context) && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
                   {decision.memory_context && (
