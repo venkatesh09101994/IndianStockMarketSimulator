@@ -48,6 +48,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f'Scheduler could not be started: {e}')
 
+    # Startup catch-up: close stale MIS positions from days the app was closed
+    try:
+        from app.services.square_off import close_stale_mis_positions
+        _db = SessionLocal()
+        try:
+            close_stale_mis_positions(_db)
+        finally:
+            _db.close()
+    except Exception as e:
+        logger.warning(f'Stale MIS cleanup failed: {e}')
+
     yield
 
     # Shutdown
