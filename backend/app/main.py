@@ -11,7 +11,7 @@ from app.db import engine, Base, SessionLocal
 from app.db_migrate import run_migrations
 from app.api import api_router
 from app.seed.seeder import seed_database
-from app.jobs.scheduler import start_scheduler, scheduler
+from app.jobs.scheduler import start_scheduler, scheduler, job_refresh_quotes
 
 def get_frontend_dist() -> str:
     # PyInstaller bundle
@@ -41,6 +41,13 @@ async def lifespan(app: FastAPI):
         seed_database(db)
     finally:
         db.close()
+
+    # Refresh quotes immediately on every launch so the UI never opens with a
+    # stale timestamp or stale portfolio valuations.
+    try:
+        job_refresh_quotes()
+    except Exception as e:
+        logger.warning(f'Initial quote refresh failed: {e}')
 
     # Start background scheduler
     try:
@@ -92,6 +99,19 @@ if os.path.isdir(frontend_dist):
         # API and docs are handled above; serve index.html for client routes
         if full_path.startswith('api/') or full_path.startswith('docs') or full_path.startswith('openapi'):
             raise HTTPException(status_code=404, detail='Not found')
+
+        # Serve real files from the build (favicon.svg, bse-bull.jpg, icons.svg,
+        # ...) instead of returning index.html for every asset request.
+        if full_path:
+            candidate = os.path.abspath(os.path.join(frontend_dist, full_path))
+            root = os.path.abspath(frontend_dist)
+            try:
+                inside_build = os.path.commonpath([candidate, root]) == root
+            except ValueError:
+                inside_build = False
+            if inside_build and os.path.isfile(candidate):
+                return FileResponse(candidate)
+
         index_file = os.path.join(frontend_dist, 'index.html')
         if os.path.exists(index_file):
             return FileResponse(index_file)

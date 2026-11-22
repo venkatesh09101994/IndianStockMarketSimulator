@@ -247,6 +247,7 @@ export const Dashboard: React.FC = () => {
                                 avg_buy_price: pos.avg_price,
                                 current_price: pos.current_price,
                                 product_type: 'MIS',
+                                side: pos.net_quantity < 0 ? 'BUY' : 'SELL',
                               });
                             }}
                             className="px-3 py-1 rounded-xl bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs font-bold border border-rose-200 transition-colors"

@@ -7,18 +7,24 @@ from app.models.position import Position
 from app.models.order import Order
 from app.models.trade import Trade
 from app.services.market_clock import get_ist_now, IST
+from app.utils.time import to_utc
 from app.schemas.portfolio import (
     PortfolioSummaryOut, HoldingOut, PositionOut, SectorAllocationOut
 )
 
-def _get_today_cnc_buys(db: Session, user_id: int) -> Dict[int, int]:
+def _get_today_cnc_net_buys(db: Session, user_id: int) -> Dict[int, int]:
+    """Net CNC shares acquired today per stock (buys minus sells).
+
+    Selling shares bought earlier today must not leave them counted as a
+    day-trade lot; otherwise day P&L uses the wrong baseline for that stock.
+    """
     today_ist = get_ist_now().date()
     trades = db.query(Trade).filter(
         Trade.user_id == user_id,
-        Trade.side == 'BUY',
+        Trade.side.in_(['BUY', 'SELL']),
         Trade.product_type == 'CNC'
     ).all()
-    bought_by_stock: Dict[int, int] = {}
+    net_by_stock: Dict[int, int] = {}
     for t in trades:
         t_dt = t.executed_at
         if t_dt.tzinfo is None:
@@ -26,8 +32,9 @@ def _get_today_cnc_buys(db: Session, user_id: int) -> Dict[int, int]:
         else:
             t_date = t_dt.astimezone(IST).date()
         if t_date == today_ist:
-            bought_by_stock[t.stock_id] = bought_by_stock.get(t.stock_id, 0) + t.quantity
-    return bought_by_stock
+            delta = t.quantity if t.side == 'BUY' else -t.quantity
+            net_by_stock[t.stock_id] = net_by_stock.get(t.stock_id, 0) + delta
+    return net_by_stock
 
 def get_portfolio_summary(db: Session, user_id: int) -> PortfolioSummaryOut:
     account = db.query(Account).filter(Account.user_id == user_id).first()
@@ -46,7 +53,7 @@ def get_portfolio_summary(db: Session, user_id: int) -> PortfolioSummaryOut:
     holdings_current_value = 0
     holdings_day_pnl = 0
 
-    today_buys = _get_today_cnc_buys(db, user_id)
+    today_buys = _get_today_cnc_net_buys(db, user_id)
 
     for h in holdings:
         q = h.stock.quote
@@ -57,7 +64,7 @@ def get_portfolio_summary(db: Session, user_id: int) -> PortfolioSummaryOut:
         # For shares bought today: baseline is buy price (cur_p - avg_buy_price)
         # For shares held overnight: baseline is yesterday's close (day_chg)
         qty_today_bought = today_buys.get(h.stock_id, 0)
-        qty_today = min(h.quantity, qty_today_bought)
+        qty_today = max(0, min(h.quantity, qty_today_bought))
         qty_overnight = max(0, h.quantity - qty_today)
 
         h_day_pnl = (qty_today * (cur_p - h.avg_buy_price)) + (qty_overnight * day_chg)
@@ -97,7 +104,7 @@ def get_portfolio_summary(db: Session, user_id: int) -> PortfolioSummaryOut:
 
 def get_holdings_list(db: Session, user_id: int) -> List[HoldingOut]:
     holdings = db.query(Holding).filter(Holding.user_id == user_id).all()
-    today_buys = _get_today_cnc_buys(db, user_id)
+    today_buys = _get_today_cnc_net_buys(db, user_id)
     results = []
     for h in holdings:
         q = h.stock.quote
@@ -109,7 +116,7 @@ def get_holdings_list(db: Session, user_id: int) -> List[HoldingOut]:
         pnl_pct = (pnl / inv_val * 100.0) if inv_val > 0 else 0.0
 
         qty_today_bought = today_buys.get(h.stock_id, 0)
-        qty_today = min(h.quantity, qty_today_bought)
+        qty_today = max(0, min(h.quantity, qty_today_bought))
         qty_overnight = max(0, h.quantity - qty_today)
         h_day_pnl = (qty_today * (cur_p - h.avg_buy_price)) + (qty_overnight * day_c)
 
@@ -152,7 +159,7 @@ def get_positions_list(db: Session, user_id: int) -> List[PositionOut]:
             realized_pnl=round(p.realized_pnl / 100.0, 2),
             total_pnl=round(total_p / 100.0, 2),
             is_open=p.is_open,
-            closed_at=p.closed_at
+            closed_at=to_utc(p.closed_at)
         ))
     return results
 

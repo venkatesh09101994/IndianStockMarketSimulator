@@ -4,6 +4,7 @@ import api from '../../api/client';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useNotificationStore } from '../../store/useNotificationStore';
 import { CompanyLogo } from '../common/CompanyLogo';
+import { estimateCharges } from '../../utils/charges';
 
 interface StockInfo {
   symbol: string;
@@ -19,6 +20,10 @@ interface OrderModalProps {
   onOrderSuccess?: () => void;
 }
 
+// BUY stop-losses trigger above the market, SELL stop-losses below it.
+const defaultTrigger = (side: 'BUY' | 'SELL', price: number) =>
+  (price * (side === 'BUY' ? 1.05 : 0.95)).toFixed(2);
+
 export const OrderModal: React.FC<OrderModalProps> = ({
   isOpen,
   onClose,
@@ -33,7 +38,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   const [orderType, setOrderType] = useState<'MARKET' | 'LIMIT' | 'SL_M'>('MARKET');
   const [quantity, setQuantity] = useState<number>(1);
   const [limitPrice, setLimitPrice] = useState<string>(stock.price.toFixed(2));
-  const [triggerPrice, setTriggerPrice] = useState<string>((stock.price * 0.95).toFixed(2));
+  const [triggerPrice, setTriggerPrice] = useState<string>(defaultTrigger(initialSide, stock.price));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,20 +48,35 @@ export const OrderModal: React.FC<OrderModalProps> = ({
   useEffect(() => {
     setSide(initialSide);
     setLimitPrice(stock.price.toFixed(2));
-    setTriggerPrice((stock.price * 0.95).toFixed(2));
+    setTriggerPrice(defaultTrigger(initialSide, stock.price));
     setError(null);
     setExecutedOrder(null);
-  }, [stock, initialSide, isOpen]);
+    // Only reset when the modal is opened for a (possibly different) ticker.
+    // Depending on the whole stock object makes 60s price refreshes wipe the
+    // user's in-progress form.
+  }, [stock.symbol, initialSide, isOpen]);
 
   if (!isOpen) return null;
 
   const currentP = stock.price;
   const effectivePrice = orderType === 'LIMIT' ? parseFloat(limitPrice) || currentP : currentP;
   const tradeValue = quantity * effectivePrice;
-  const requiredFunds = productType === 'MIS' ? tradeValue * 0.2 : side === 'BUY' ? tradeValue : 0;
+  const estimatedCharges = estimateCharges(side, productType, quantity, effectivePrice);
+  const requiredFunds =
+    productType === 'MIS'
+      ? tradeValue * 0.2 + estimatedCharges
+      : side === 'BUY'
+      ? tradeValue + estimatedCharges
+      : 0;
   const availableCash = user?.cash_balance || 0;
   const hasEnoughFunds = side === 'SELL' && productType === 'CNC' ? true : availableCash >= requiredFunds;
   const balanceAfterTrade = availableCash - requiredFunds;
+  const executedOrderIsFilled = executedOrder?.status === 'EXECUTED';
+
+  const handleSideChange = (next: 'BUY' | 'SELL') => {
+    setSide(next);
+    setTriggerPrice(defaultTrigger(next, stock.price));
+  };
 
   const handleQuickQty = (add: number) => {
     setQuantity((prev) => Math.max(1, prev + add));
@@ -64,10 +84,11 @@ export const OrderModal: React.FC<OrderModalProps> = ({
 
   const handleMaxQty = () => {
     if (side === 'BUY') {
+      // Keep a tiny buffer for statutory charges so MAX doesn't get rejected.
       const maxQty =
         productType === 'MIS'
-          ? Math.floor(availableCash / (effectivePrice * 0.2))
-          : Math.floor(availableCash / effectivePrice);
+          ? Math.floor(availableCash / (effectivePrice * 0.2 * 1.001))
+          : Math.floor(availableCash / (effectivePrice * 1.001));
       setQuantity(Math.max(1, maxQty));
     }
   };
@@ -76,6 +97,30 @@ export const OrderModal: React.FC<OrderModalProps> = ({
     e.preventDefault();
     // No login required in single-user mode
     setError(null);
+
+    if (orderType === 'LIMIT') {
+      const limit = parseFloat(limitPrice);
+      if (!Number.isFinite(limit) || limit <= 0) {
+        setError('Enter a valid limit price.');
+        return;
+      }
+    }
+    if (orderType === 'SL_M') {
+      const trigger = parseFloat(triggerPrice);
+      if (!Number.isFinite(trigger) || trigger <= 0) {
+        setError('Enter a valid trigger price.');
+        return;
+      }
+      if (side === 'BUY' && trigger <= currentP) {
+        setError('BUY stop-loss trigger must be above the current market price.');
+        return;
+      }
+      if (side === 'SELL' && trigger >= currentP) {
+        setError('SELL stop-loss trigger must be below the current market price.');
+        return;
+      }
+    }
+
     setLoading(true);
 
     try {
@@ -105,13 +150,18 @@ export const OrderModal: React.FC<OrderModalProps> = ({
         // ignore
       }
 
+      const isExecuted = data.status === 'EXECUTED';
       const fillPrice = data.execution_price || effectivePrice;
       const totalAmount = fillPrice * quantity;
 
       // Add to notification center
       addNotification({
-        title: `${side === 'BUY' ? 'Bought' : 'Sold'} ${quantity} ${stock.symbol}`,
-        message: `${side === 'BUY' ? 'Bought' : 'Sold'} ${quantity} shares of ${stock.symbol} @ ₹${fillPrice.toFixed(2)} (${productType} ${orderType})`,
+        title: isExecuted
+          ? `${side === 'BUY' ? 'Bought' : 'Sold'} ${quantity} ${stock.symbol}`
+          : `${side} order placed for ${quantity} ${stock.symbol}`,
+        message: isExecuted
+          ? `${side === 'BUY' ? 'Bought' : 'Sold'} ${quantity} shares of ${stock.symbol} @ ₹${fillPrice.toFixed(2)} (${productType} ${orderType})`
+          : `Pending ${productType} ${orderType} order for ${quantity} shares of ${stock.symbol}.`,
         type: side === 'BUY' ? 'BUY' : 'SELL',
         symbol: stock.symbol,
         price: fillPrice,
@@ -187,19 +237,19 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                   ? 'text-rose-700 bg-rose-50 border-rose-200'
                   : 'text-emerald-700 bg-emerald-50 border-emerald-200'
               }`}>
-                {executedOrder.side === 'BUY'
-                  ? (executedOrder.orderType === 'LIMIT' || executedOrder.orderType === 'SL_M' ? 'Limit Order Placed' : 'Order Confirmed & Executed')
-                  : 'Sell Order Confirmed'}
+                {executedOrderIsFilled
+                  ? (executedOrder.side === 'BUY' ? 'Order Confirmed & Executed' : 'Sell Order Confirmed')
+                  : 'Order Placed (Pending)'}
               </span>
               <h2 className="text-2xl font-black text-slate-900 mt-2">
-                {executedOrder.side === 'BUY'
-                  ? (executedOrder.orderType === 'LIMIT' || executedOrder.orderType === 'SL_M' ? 'Stock Ordered!' : 'Stock Bought!')
-                  : 'Stock Sold!'}
+                {executedOrderIsFilled
+                  ? (executedOrder.side === 'BUY' ? 'Stock Bought!' : 'Stock Sold!')
+                  : 'Order Placed!'}
               </h2>
               <p className="text-xs text-slate-500 font-medium mt-1">
-                {executedOrder.side === 'BUY'
-                  ? `Your buy order for ${stock.company_name} has been processed successfully.`
-                  : `Your sell order for ${stock.company_name} has been completed.`}
+                {executedOrderIsFilled
+                  ? `Your ${executedOrder.side === 'BUY' ? 'buy' : 'sell'} order for ${stock.company_name} has been completed.`
+                  : `Your ${executedOrder.orderType} order is pending and will execute when the market price reaches your ${executedOrder.orderType === 'LIMIT' ? 'limit' : 'trigger'} price.`}
               </p>
             </div>
 
@@ -216,19 +266,40 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-500 font-medium">Quantity Filled:</span>
-                <span className="font-bold text-slate-900">{executedOrder.quantity} Shares</span>
+                <span className="text-slate-500 font-medium">
+                  Quantity {executedOrderIsFilled ? 'Filled' : 'Ordered'}:
+                </span>
+                <span className="font-bold text-slate-900">
+                  {executedOrderIsFilled
+                    ? (executedOrder.filled_quantity ?? executedOrder.quantity)
+                    : executedOrder.quantity}{' '}
+                  Shares
+                </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-500 font-medium">Execution Price:</span>
+                <span className="text-slate-500 font-medium">
+                  {executedOrderIsFilled ? 'Execution Price:' : 'Order Price:'}
+                </span>
                 <span className="font-black text-slate-950 text-sm">
-                  ₹{executedOrder.fillPrice.toFixed(2)}
+                  ₹
+                  {(
+                    executedOrder.execution_price ??
+                    executedOrder.limit_price ??
+                    executedOrder.trigger_price ??
+                    executedOrder.fillPrice
+                  ).toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between items-center pt-2 border-t border-slate-200">
-                <span className="text-slate-700 font-bold">Total Amount {executedOrder.side === 'BUY' ? 'Deducted' : 'Credited'}:</span>
+                <span className="text-slate-700 font-bold">
+                  {executedOrderIsFilled
+                    ? `Total Amount ${executedOrder.side === 'BUY' ? 'Deducted' : 'Credited'}:`
+                    : 'Amount Blocked:'}
+                </span>
                 <span className="font-black text-base text-zinc-950">
-                  {formatCurrency(executedOrder.totalAmount)}
+                  {formatCurrency(
+                    executedOrderIsFilled ? executedOrder.totalAmount : executedOrder.blocked_amount
+                  )}
                 </span>
               </div>
               {executedOrder.realized_pnl !== null && executedOrder.realized_pnl !== undefined && (
@@ -257,7 +328,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
               <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-2xl">
                 <button
                   type="button"
-                  onClick={() => setSide('BUY')}
+                  onClick={() => handleSideChange('BUY')}
                   className={`py-2 rounded-xl text-xs font-bold transition-all ${
                     side === 'BUY'
                       ? 'bg-emerald-600 text-white shadow-sm'
@@ -268,7 +339,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSide('SELL')}
+                  onClick={() => handleSideChange('SELL')}
                   className={`py-2 rounded-xl text-xs font-bold transition-all ${
                     side === 'SELL'
                       ? 'bg-rose-600 text-white shadow-sm'
@@ -420,8 +491,8 @@ export const OrderModal: React.FC<OrderModalProps> = ({
                   </span>
                 </div>
                 <div className="flex justify-between text-slate-500">
-                  <span>Charges:</span>
-                  <span className="font-semibold text-emerald-600">₹0.00 (Zero)</span>
+                  <span>Charges (est.):</span>
+                  <span className="font-semibold text-slate-700">{formatCurrency(estimatedCharges)}</span>
                 </div>
                 <div className="flex justify-between text-slate-500 border-t border-slate-200 pt-2">
                   <span>Cash After Trade:</span>

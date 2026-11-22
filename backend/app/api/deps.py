@@ -58,13 +58,23 @@ def get_current_user(
 
     if auth_token:
         payload = decode_access_token(auth_token)
-        if payload:
-            user_id = payload.get('sub')
-            if user_id:
-                user = db.query(User).filter(User.id == int(user_id)).first()
-                if user:
-                    return user
+        unauthorized = HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail='Invalid or expired authentication token',
+            headers={'WWW-Authenticate': 'Bearer'}
+        )
+        if not payload:
+            raise unauthorized
+        try:
+            user_id = int(payload.get('sub'))
+        except (TypeError, ValueError):
+            raise unauthorized
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise unauthorized
+        return user
 
+    # No credentials at all: keep the intentional local no-login mode.
     return _get_or_create_default_user(db)
 
 def get_optional_current_user(

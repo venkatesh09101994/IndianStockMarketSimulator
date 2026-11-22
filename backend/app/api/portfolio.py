@@ -14,6 +14,7 @@ from app.schemas.portfolio import (
 from app.services.portfolio_service import (
     get_portfolio_summary, get_holdings_list, get_positions_list, get_sector_allocation
 )
+from app.utils.time import to_utc
 
 router = APIRouter(prefix='/portfolio', tags=['Portfolio'])
 
@@ -46,7 +47,7 @@ def trades(db: Session = Depends(get_db), current_user: User = Depends(get_curre
             charges=round((t.charges or 0) / 100.0, 2),
             realized_pnl=round(t.realized_pnl / 100.0, 2) if t.realized_pnl is not None else None,
             reason=t.reason,
-            executed_at=t.executed_at
+            executed_at=to_utc(t.executed_at)
         )
         for t in user_trades
     ]
@@ -82,7 +83,7 @@ def wallet_history(db: Session = Depends(get_db), current_user: User = Depends(g
             ref_order_id=t.ref_order_id,
             ref_trade_id=t.ref_trade_id,
             note=t.note,
-            created_at=t.created_at
+            created_at=to_utc(t.created_at)
         )
         for t in txs
     ]

@@ -5,6 +5,7 @@ from app.models.user import User
 from app.models.ai_decision import AIDecision
 from app.services.ai_trader import analyze, execute_decision
 from app.services.ai_config import get_llm_config, set_llm_config, get_ai_config, set_ai_config
+from app.utils.time import to_utc
 import requests
 import os
 
@@ -22,7 +23,11 @@ def execute_endpoint(payload: dict, db: Session = Depends(get_db), current_user:
     did = (payload or {}).get('decision_id')
     if not did:
         raise HTTPException(status_code=400, detail='decision_id required')
-    return execute_decision(db, current_user, int(did))
+    try:
+        did = int(did)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail='decision_id must be an integer')
+    return execute_decision(db, current_user, did)
 
 @router.get('/history')
 def history(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -41,19 +46,19 @@ def history(db: Session = Depends(get_db), current_user: User = Depends(get_curr
             'scheduled': bool(r.scheduled),
             'guardrail_note': r.guardrail_note,
             'order_id': r.order_id,
-            'created_at': r.created_at.isoformat() if r.created_at else None,
+            'created_at': to_utc(r.created_at).isoformat() if r.created_at else None,
         }
         for r in rows
     ]
 
 @router.get('/config')
-def get_config(db: Session = Depends(get_db)):
+def get_config(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     llm = get_llm_config(db)
     ai = get_ai_config(db)
     return {'llm': llm, 'ai': ai}
 
 @router.post('/config')
-def update_config(payload: dict, db: Session = Depends(get_db)):
+def update_config(payload: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if 'llm' in payload and isinstance(payload['llm'], dict):
         l = payload['llm']
         set_llm_config(db, l.get('base_url', ''), l.get('api_key', ''), l.get('model', ''))
@@ -62,7 +67,7 @@ def update_config(payload: dict, db: Session = Depends(get_db)):
     return {'message': 'saved'}
 
 @router.post('/test-connection')
-def test_connection(payload: dict = None, db: Session = Depends(get_db)):
+def test_connection(payload: dict = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     payload = payload or {}
     if 'base_url' in payload:
         base_url = payload['base_url']
@@ -86,7 +91,7 @@ def test_connection(payload: dict = None, db: Session = Depends(get_db)):
         return {'reachable': False, 'error': str(e), 'base_url': base_url, 'model': model}
 
 @router.get('/status')
-def status(db: Session = Depends(get_db)):
+def status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     c = get_llm_config(db)
     base_url, api_key, model = c['base_url'], c['api_key'], c['model']
     try:

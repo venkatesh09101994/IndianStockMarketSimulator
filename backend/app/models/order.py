@@ -18,6 +18,11 @@ class Order(Base):
     filled_quantity = Column(Integer, default=0, nullable=False)
     limit_price = Column(BigInteger, nullable=True)  # paise
     trigger_price = Column(BigInteger, nullable=True)  # paise
+    # Quote snapshot at placement. Used so a resting order cannot fill on a
+    # day high/low that was already present before the order existed.
+    placed_price = Column(BigInteger, nullable=True)
+    placed_day_high = Column(BigInteger, nullable=True)
+    placed_day_low = Column(BigInteger, nullable=True)
     validity = Column(String(10), default='DAY', nullable=False)  # DAY | GTT
     
     status = Column(String(20), default='PENDING', index=True, nullable=False)  # PENDING | EXECUTED | CANCELLED | REJECTED | EXPIRED

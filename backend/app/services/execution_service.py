@@ -14,6 +14,11 @@ from app.services.charges import compute_charges
 logger = logging.getLogger(__name__)
 
 def execute_order(db: Session, order: Order, fill_price: int, reason: str = 'USER') -> Trade:
+    # A fill moves cash, holdings and ledger rows. Never allow the same order
+    # to be executed twice (e.g. overlapping scheduler ticks or a manual retry).
+    if order.status != 'PENDING':
+        raise ValueError(f'Order #{order.id} is already {order.status}')
+
     account = db.query(Account).filter(Account.user_id == order.user_id).first()
     if not account:
         raise ValueError('User account not found')
@@ -64,9 +69,11 @@ def execute_order(db: Session, order: Order, fill_price: int, reason: str = 'USE
                 ))
 
             holding = db.query(Holding).filter(Holding.user_id == user_id, Holding.stock_id == order.stock_id).first()
+            # Acquisition charges are part of the cost basis. Including them
+            # keeps holdings P&L consistent with cash/equity in the summary.
             if holding:
                 new_total_qty = holding.quantity + order.quantity
-                new_avg = int(round((holding.quantity * holding.avg_buy_price + trade_value) / new_total_qty))
+                new_avg = int(round((holding.quantity * holding.avg_buy_price + trade_value + charges) / new_total_qty))
                 holding.quantity = new_total_qty
                 holding.avg_buy_price = new_avg
                 holding.updated_at = now_utc
@@ -75,7 +82,7 @@ def execute_order(db: Session, order: Order, fill_price: int, reason: str = 'USE
                     user_id=user_id,
                     stock_id=order.stock_id,
                     quantity=order.quantity,
-                    avg_buy_price=fill_price,
+                    avg_buy_price=fill_price + int(round(charges / order.quantity)),
                     updated_at=now_utc
                 ))
 

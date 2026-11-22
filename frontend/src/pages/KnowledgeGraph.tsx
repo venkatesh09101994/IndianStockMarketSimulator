@@ -49,6 +49,19 @@ export const KnowledgeGraph: React.FC = () => {
   const positionsRef = useRef<Record<string, { x: number; y: number; vx: number; vy: number }>>({ ...KG_CACHE.positions });
   const animRef = useRef<number>(0);
 
+  const makeInitialPositions = (g: Graph) => {
+    const canvas = canvasRef.current;
+    const w = canvas ? canvas.width : 800;
+    const h = canvas ? canvas.height : 600;
+    const pos: Record<string, { x: number; y: number; vx: number; vy: number }> = {};
+    g.nodes.forEach((n, i) => {
+      const angle = (i / Math.max(g.nodes.length, 1)) * Math.PI * 2;
+      const r = Math.min(w, h) * 0.35;
+      pos[n.id] = { x: w / 2 + Math.cos(angle) * r, y: h / 2 + Math.sin(angle) * r, vx: 0, vy: 0 };
+    });
+    return pos;
+  };
+
   useEffect(() => {
     // If cached, skip fetch/simulation init
     if (KG_CACHE.graph && KG_CACHE.simulated) {
@@ -76,15 +89,7 @@ export const KnowledgeGraph: React.FC = () => {
         }
         setGraph(g);
         KG_CACHE.graph = g;
-        const pos: Record<string, { x: number; y: number; vx: number; vy: number }> = {};
-        const canvas = canvasRef.current;
-        const w = canvas ? canvas.width : 800;
-        const h = canvas ? canvas.height : 600;
-        g.nodes.forEach((n, i) => {
-          const angle = (i / g.nodes.length) * Math.PI * 2;
-          const r = Math.min(w, h) * 0.35;
-          pos[n.id] = { x: w / 2 + Math.cos(angle) * r, y: h / 2 + Math.sin(angle) * r, vx: 0, vy: 0 };
-        });
+        const pos = makeInitialPositions(g);
         positionsRef.current = pos;
         KG_CACHE.positions = { ...pos };
       } catch (e) {
@@ -121,6 +126,10 @@ export const KnowledgeGraph: React.FC = () => {
           if (filterSector !== 'all') {
             if (srcNode?.sector !== filterSector && tgtNode?.sector !== filterSector) continue;
           }
+          if (search) {
+            const q = search.toLowerCase();
+            if (!e.source.toLowerCase().includes(q) && !e.target.toLowerCase().includes(q)) continue;
+          }
           const highlighted = selected && (e.source === selected || e.target === selected);
           ctx.strokeStyle = highlighted ? 'rgba(16,185,129,0.9)' : 'rgba(100,116,139,0.12)';
           ctx.lineWidth = highlighted ? 2 : 0.5;
@@ -134,6 +143,13 @@ export const KnowledgeGraph: React.FC = () => {
           if (!p) continue;
           if (filterSector !== 'all' && n.sector !== filterSector) ctx.globalAlpha = 0.15;
           else ctx.globalAlpha = 1;
+          if (
+            search &&
+            !n.id.toLowerCase().includes(search.toLowerCase()) &&
+            !n.label.toLowerCase().includes(search.toLowerCase())
+          ) {
+            ctx.globalAlpha = 0.1;
+          }
           const isSel = n.id === selected;
           const isHov = n.id === hovered;
           const color = sectorColor(n.sector);
@@ -337,6 +353,27 @@ export const KnowledgeGraph: React.FC = () => {
   const selectedNode = selected ? nodeById(selected) : null;
   const selectedNeighbors = selected ? (graph ? graph.edges.filter(e => e.source === selected || e.target === selected).map(e => e.source === selected ? e.target : e.source) : []) : [];
 
+  const rebuildGraph = async () => {
+    setLoading(true);
+    try {
+      await api.post('/graph/build');
+      const r = await api.get('/graph/full');
+      const g: Graph = r.data;
+      setGraph(g);
+      KG_CACHE.graph = g;
+      // Force a fresh layout: old positions belong to the previous graph.
+      KG_CACHE.simulated = false;
+      const pos = makeInitialPositions(g);
+      positionsRef.current = pos;
+      KG_CACHE.positions = { ...pos };
+      setSelected(null);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -360,7 +397,7 @@ export const KnowledgeGraph: React.FC = () => {
             {sectors.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
           <button
-            onClick={async () => { setLoading(true); try { await api.post('/graph/build'); const r = await api.get('/graph/full'); setGraph(r.data); } catch(e){} finally { setLoading(false); } }}
+            onClick={rebuildGraph}
             className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-lg font-semibold"
           >
             Rebuild

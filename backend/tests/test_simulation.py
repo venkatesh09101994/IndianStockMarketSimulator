@@ -39,6 +39,16 @@ def test_full_simulation():
         token = signup_res.json()['access_token']
         headers = {'Authorization': f'Bearer {token}'}
 
+        # 4b. Invalid credentials must not silently fall back to the local user
+        bad_headers = {'Authorization': 'Bearer not-a-real-token'}
+        assert client.get('/api/portfolio/summary', headers=bad_headers).status_code == 401
+        assert client.get('/api/ai/config', headers=bad_headers).status_code == 401
+        assert client.post('/api/admin/replay/start', headers=bad_headers).status_code == 401
+
+        # 4c. A malformed decision id is a client error, not a server error
+        bad_decision = client.post('/api/ai/execute', json={'decision_id': 'abc'}, headers=headers)
+        assert bad_decision.status_code == 400
+
         # 5. Enable replay mode so orders execute anytime
         client.post('/api/admin/replay/start')
 

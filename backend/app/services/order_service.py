@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.models.account import Account
@@ -51,17 +52,29 @@ def place_order(db: Session, user_id: int, order_in: OrderCreate) -> Order:
         holding = db.query(Holding).filter(Holding.user_id == user_id, Holding.stock_id == stock.id).first()
         available_qty = holding.quantity if holding else 0
 
-        pending_sell_qty = db.query(Order).filter(
+        # Sum the *shares* reserved by pending sell orders, not the number of
+        # orders. Counting rows let users oversell by splitting orders up.
+        pending_sell_qty = db.query(
+            func.coalesce(func.sum(Order.quantity - Order.filled_quantity), 0)
+        ).filter(
             Order.user_id == user_id,
             Order.stock_id == stock.id,
             Order.product_type == 'CNC',
             Order.side == 'SELL',
             Order.status == 'PENDING'
-        ).count()
+        ).scalar() or 0
         if available_qty - pending_sell_qty < order_in.quantity:
             raise ValueError(f'Insufficient holdings: you have {available_qty} shares, cannot sell {order_in.quantity}')
 
-    est_price = limit_paise if order_in.order_type == 'LIMIT' else current_price
+    # Reserve funds/margin close to the price at which the order is expected
+    # to fill. SL_M fills at the trigger (or a worse gap price), so blocking
+    # against the pre-trigger price can leave the order permanently unfilled.
+    if order_in.order_type == 'LIMIT' and limit_paise:
+        est_price = limit_paise
+    elif order_in.order_type == 'SL_M' and trigger_paise:
+        est_price = trigger_paise
+    else:
+        est_price = current_price
     total_val = order_in.quantity * est_price
     blocked_amount = 0
 
@@ -93,6 +106,9 @@ def place_order(db: Session, user_id: int, order_in: OrderCreate) -> Order:
         quantity=order_in.quantity,
         limit_price=limit_paise,
         trigger_price=trigger_paise,
+        placed_price=current_price,
+        placed_day_high=quote.day_high if quote else current_price,
+        placed_day_low=quote.day_low if quote else current_price,
         validity=order_in.validity,
         status='PENDING',
         blocked_amount=blocked_amount,

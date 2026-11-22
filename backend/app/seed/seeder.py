@@ -1,6 +1,7 @@
 import os
 import csv
 import logging
+import sys
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from app.models.stock import Stock, LatestQuote, PriceHistory
@@ -119,6 +120,10 @@ DEFAULT_STOCK_PRICES = {
 def seed_database(db: Session):
     # 1. Seed stocks
     csv_path = os.path.join(os.path.dirname(__file__), "nifty50.csv")
+    if getattr(sys, 'frozen', False) and not os.path.exists(csv_path):
+        bundled_csv = os.path.join(getattr(sys, '_MEIPASS', ''), 'app', 'seed', 'nifty50.csv')
+        if os.path.exists(bundled_csv):
+            csv_path = bundled_csv
     if os.path.exists(csv_path):
         with open(csv_path, mode="r", encoding="utf-8") as f:
             reader = csv.DictReader(f)

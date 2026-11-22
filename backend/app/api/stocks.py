@@ -2,7 +2,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, desc, asc
+from sqlalchemy import or_, desc, asc, func
 from app.api.deps import get_db, get_optional_current_user
 from app.models.user import User
 from app.models.stock import Stock, LatestQuote, PriceHistory
@@ -16,6 +16,14 @@ from app.services.stock_onboard import search_online, add_stock
 from app.providers import price_provider
 
 router = APIRouter(tags=['Stocks'])
+
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """SQLite returns naive datetimes; treat them as UTC so clients can parse them reliably."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 def quote_to_out(q: LatestQuote) -> LatestQuoteOut:
     return LatestQuoteOut(
@@ -33,7 +41,7 @@ def quote_to_out(q: LatestQuote) -> LatestQuoteOut:
         return_6m_pct=round(q.return_6m_pct, 2) if q.return_6m_pct is not None else None,
         return_1y_pct=round(q.return_1y_pct, 2) if q.return_1y_pct is not None else None,
         avg_volume_20d=q.avg_volume_20d,
-        updated_at=q.updated_at
+        updated_at=_as_utc(q.updated_at)
     )
 
 @router.get('/stocks', response_model=List[StockBrief])
@@ -42,7 +50,7 @@ def get_stocks(
     sector: Optional[str] = None,
     sort: Optional[str] = 'symbol',
     page: int = 1,
-    limit: int = 50,
+    limit: Optional[int] = None,
     db: Session = Depends(get_db),
     user: Optional[User] = Depends(get_optional_current_user)
 ):
@@ -72,6 +80,12 @@ def get_stocks(
         stocks = sorted(stocks, key=lambda s: s.quote.volume if s.quote else 0, reverse=True)
     elif sort == 'market_cap':
         stocks = sorted(stocks, key=lambda s: s.market_cap or 0, reverse=True)
+
+    # Optional pagination. The header search asks for a handful of results,
+    # while the screener omits `limit` and expects the full universe.
+    if limit and limit > 0:
+        start = max(0, (max(page, 1) - 1) * limit)
+        stocks = stocks[start:start + limit]
 
     results = []
     for s in stocks:
@@ -218,7 +232,7 @@ def get_stock_history(
         selected = candles_db[-7:]
         return [
             CandleOut(
-                ts=c.ts,
+                ts=_as_utc(c.ts),
                 open=round(c.open / 100.0, 2),
                 high=round(c.high / 100.0, 2),
                 low=round(c.low / 100.0, 2),
@@ -232,14 +246,14 @@ def get_stock_history(
     if timeframe.upper() == '1M' and candles_db and len(candles_db) >= 10:
         return [
             CandleOut(
-                ts=c.ts,
+                ts=_as_utc(c.ts),
                 open=round(c.open / 100.0, 2),
                 high=round(c.high / 100.0, 2),
                 low=round(c.low / 100.0, 2),
                 close=round(c.close / 100.0, 2),
                 volume=c.volume
             )
-            for c in candles_db
+            for c in candles_db[-30:]
         ]
 
     # 4. Multi-month / 6M / YTD / 1Y / 5Y / ALL view
@@ -261,9 +275,39 @@ def get_stock_history(
         ))
     return generated
 
+@router.post('/market/refresh')
+def refresh_market_data(db: Session = Depends(get_db)):
+    """Force a quote refresh, e.g. when the desktop window is reopened."""
+    from app.jobs.scheduler import job_refresh_quotes
+    job_refresh_quotes(db)
+    latest = (
+        db.query(func.max(LatestQuote.updated_at))
+        .join(Stock, Stock.id == LatestQuote.stock_id)
+        .filter(Stock.is_active == True)
+        .scalar()
+    )
+    return {'status': 'refreshed', 'last_updated': _as_utc(latest)}
+
+
 @router.get('/market/status', response_model=MarketStatusOut)
 def get_market_status(db: Session = Depends(get_db)):
     details = get_market_status_details(db)
+
+    # When were stock prices last refreshed? Use the newest quote timestamp
+    # across active stocks so the UI can show a single, trustworthy timestamp.
+    latest = (
+        db.query(func.max(LatestQuote.updated_at))
+        .join(Stock, Stock.id == LatestQuote.stock_id)
+        .filter(Stock.is_active == True)
+        .scalar()
+    )
+    last_updated = _as_utc(latest)
+    age_seconds = None
+    if last_updated is not None:
+        age_seconds = max(0, int((datetime.now(timezone.utc) - last_updated).total_seconds()))
+
+    details['last_updated'] = last_updated
+    details['data_age_seconds'] = age_seconds
     return MarketStatusOut(**details)
 
 @router.get('/market/ticker', response_model=List[TickerItem])

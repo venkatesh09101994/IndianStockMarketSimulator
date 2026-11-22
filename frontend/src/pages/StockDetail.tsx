@@ -8,12 +8,14 @@ import {
   ArrowDownRight,
   TrendingUp,
   ShieldAlert,
+  Clock,
 } from 'lucide-react';
 import api from '../api/client';
 import { StockAreaChart, CandleData } from '../components/charts/StockAreaChart';
 import { OrderModal } from '../components/trading/OrderModal';
 import { CompanyLogo } from '../components/common/CompanyLogo';
 import { useAuthStore } from '../store/useAuthStore';
+import { formatISTDateTime, formatISTTime, timeAgo } from '../utils/datetime';
 
 interface QuoteData {
   price: number;
@@ -30,6 +32,7 @@ interface QuoteData {
   return_6m_pct?: number;
   return_1y_pct?: number;
   avg_volume_20d?: number;
+  updated_at?: string;
 }
 
 interface StockData {
@@ -69,65 +72,91 @@ export const StockDetail: React.FC = () => {
   const [orderModalOpen, setOrderModalOpen] = useState<boolean>(false);
   const [orderSide, setOrderSide] = useState<'BUY' | 'SELL'>('BUY');
 
-  const activeSymbol = (stock?.symbol || symbol).toUpperCase();
+  // The route is the source of truth. Using stock.symbol here briefly shows
+  // the previous company after navigating to a different ticker.
+  const activeSymbol = (symbol || 'RELIANCE').toUpperCase();
 
-  // Load stock detail
-  const fetchStockDetail = async () => {
+  useEffect(() => {
+    let cancelled = false;
+    const requested = (symbol || 'RELIANCE').toUpperCase();
+
+    // Drop data belonging to the previously viewed ticker.
+    setStock(null);
+    setCandles([]);
+    setInWatchlist(false);
+    setLoading(true);
+
+    const loadStock = async () => {
+      try {
+        const res = await api.get(`/stocks/${requested}`);
+        if (cancelled) return;
+        if (res.data) {
+          setStock(res.data);
+          setInWatchlist(!!res.data.in_watchlist);
+        }
+      } catch (e) {
+        if (!cancelled) console.error('Failed to load stock details:', e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    const loadComparison = async () => {
+      try {
+        const res = await api.get('/stocks/compare?symbols=RELIANCE,TCS,HDFCBANK,INFY,ICICIBANK,BHARTIARTL,SBIN,ITC,LT,MARUTI,TITAN,BAJFINANCE');
+        if (cancelled || !res.data || !Array.isArray(res.data)) return;
+        setComparisonStocks(
+          res.data.filter((c: ComparisonStock) => c.symbol !== requested).slice(0, 8)
+        );
+      } catch (e) {
+        if (!cancelled) console.error('Failed to load comparison stocks:', e);
+      }
+    };
+
+    loadStock();
+    loadComparison();
+    const interval = setInterval(loadStock, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [symbol]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const requested = (symbol || 'RELIANCE').toUpperCase();
+
+    const loadHistory = async () => {
+      try {
+        const res = await api.get(`/stocks/${requested}/history?range=${selectedRange}`);
+        if (cancelled || !res.data || !Array.isArray(res.data)) return;
+        setCandles(res.data);
+      } catch (e) {
+        if (!cancelled) console.error('Failed to load candles:', e);
+      }
+    };
+
+    setCandles([]);
+    loadHistory();
+    const interval = setInterval(loadHistory, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [selectedRange, symbol]);
+
+  const refreshStock = async () => {
+    const requested = activeSymbol;
     try {
-      setLoading(true);
-      const res = await api.get(`/stocks/${symbol.toUpperCase()}`);
+      const res = await api.get(`/stocks/${requested}`);
       if (res.data) {
         setStock(res.data);
         setInWatchlist(!!res.data.in_watchlist);
       }
     } catch (e) {
-      console.error('Failed to load stock details:', e);
-    } finally {
-      setLoading(false);
+      console.error('Failed to refresh stock details:', e);
     }
   };
-
-  // Load candles independently
-  const fetchHistory = async () => {
-    try {
-      const res = await api.get(`/stocks/${symbol.toUpperCase()}/history?range=${selectedRange}`);
-      if (res.data && Array.isArray(res.data)) {
-        setCandles(res.data);
-      }
-    } catch (e) {
-      console.error('Failed to load candles:', e);
-    }
-  };
-
-  // Load comparison Indian stocks
-  const fetchComparison = async () => {
-    try {
-      const res = await api.get('/stocks/compare?symbols=RELIANCE,TCS,HDFCBANK,INFY,ICICIBANK,BHARTIARTL,SBIN,ITC,LT,MARUTI,TITAN,BAJFINANCE');
-      if (res.data && Array.isArray(res.data)) {
-        const filtered = res.data.filter((c: ComparisonStock) => c.symbol !== symbol.toUpperCase()).slice(0, 8);
-        setComparisonStocks(filtered);
-      }
-    } catch (e) {
-      console.error('Failed to load comparison stocks:', e);
-    }
-  };
-
-  useEffect(() => {
-    fetchStockDetail();
-    fetchComparison();
-    const interval = setInterval(() => {
-      fetchStockDetail();
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [symbol]);
-
-  useEffect(() => {
-    fetchHistory();
-    const interval = setInterval(() => {
-      fetchHistory();
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [selectedRange, symbol]);
 
   const toggleWatchlist = async () => {
     // No login required in single-user mode
@@ -201,6 +230,18 @@ export const StockDetail: React.FC = () => {
                 {dayChange >= 0 ? '+' : ''}{dayChange.toFixed(2)} ({dayChangePct >= 0 ? '+' : ''}{dayChangePct.toFixed(2)}%)
               </span>
             </div>
+
+            {quote?.updated_at && (
+              <p
+                className="flex items-center gap-1 text-[11px] text-slate-400 font-medium mt-1.5"
+                title={`Last updated: ${formatISTDateTime(quote.updated_at)} IST`}
+              >
+                <Clock className="w-3 h-3" />
+                <span>Last updated {formatISTTime(quote.updated_at)} IST</span>
+                <span className="text-slate-300">•</span>
+                <span>{timeAgo(quote.updated_at)}</span>
+              </p>
+            )}
           </div>
         </div>
 
@@ -242,7 +283,7 @@ export const StockDetail: React.FC = () => {
           <span className="text-xs font-semibold text-slate-400">Market Cap</span>
           <div className="my-2">
             <span className="text-xl sm:text-2xl font-black text-slate-900">
-              {stock?.market_cap ? `₹${stock.market_cap.toLocaleString()} Cr` : `₹${Math.round(currentPrice * 65).toLocaleString()} Cr`}
+              {stock?.market_cap ? `₹${stock.market_cap.toLocaleString()} Cr` : '—'}
             </span>
           </div>
           <div className="flex items-center justify-between text-xs pt-1">
@@ -274,7 +315,7 @@ export const StockDetail: React.FC = () => {
           <span className="text-xs font-semibold text-slate-400">52 Week High</span>
           <div className="my-2">
             <span className="text-xl sm:text-2xl font-black text-slate-900">
-              ₹{quote?.week52_high ? quote.week52_high.toFixed(2) : (currentPrice * 1.15).toFixed(2)}
+              {quote?.week52_high ? `₹${quote.week52_high.toFixed(2)}` : '—'}
             </span>
           </div>
           <div className="flex items-center justify-between text-xs pt-1">
@@ -290,7 +331,7 @@ export const StockDetail: React.FC = () => {
           <span className="text-xs font-semibold text-slate-400">52 Week Low</span>
           <div className="my-2">
             <span className="text-xl sm:text-2xl font-black text-slate-900">
-              ₹{quote?.week52_low ? quote.week52_low.toFixed(2) : (currentPrice * 0.85).toFixed(2)}
+              {quote?.week52_low ? `₹${quote.week52_low.toFixed(2)}` : '—'}
             </span>
           </div>
           <div className="flex items-center justify-between text-xs pt-1">
@@ -370,8 +411,7 @@ export const StockDetail: React.FC = () => {
           <div>
             <h3 className="font-bold text-base text-slate-900">Details Stock</h3>
             <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              {stock?.description ||
-                `${companyName} (${activeSymbol}) is listed on the National Stock Exchange of India with strong liquidity and market capitalization.`}
+              {stock?.description || 'No description available for this stock.'}
             </p>
           </div>
 
@@ -402,7 +442,7 @@ export const StockDetail: React.FC = () => {
             <div className="py-2.5 flex justify-between items-center">
               <span className="text-slate-400">Market Cap</span>
               <span className="font-semibold text-slate-800">
-                {stock?.market_cap ? `₹${stock.market_cap.toLocaleString()} Cr` : `₹${Math.round(currentPrice * 65).toLocaleString()} Cr`}
+                {stock?.market_cap ? `₹${stock.market_cap.toLocaleString()} Cr` : '—'}
               </span>
             </div>
             <div className="py-2.5 flex justify-between items-center">
@@ -414,28 +454,39 @@ export const StockDetail: React.FC = () => {
             <div className="py-2.5 flex justify-between items-center">
               <span className="text-slate-400">52 Week High</span>
               <span className="font-semibold text-slate-800">
-                ₹{quote?.week52_high ? quote.week52_high.toFixed(2) : (currentPrice * 1.15).toFixed(2)}
+                {quote?.week52_high ? `₹${quote.week52_high.toFixed(2)}` : '—'}
               </span>
             </div>
             <div className="py-2.5 flex justify-between items-center">
               <span className="text-slate-400">52 Week Low</span>
               <span className="font-semibold text-slate-800">
-                ₹{quote?.week52_low ? quote.week52_low.toFixed(2) : (currentPrice * 0.85).toFixed(2)}
+                {quote?.week52_low ? `₹${quote.week52_low.toFixed(2)}` : '—'}
               </span>
             </div>
             <div className="py-2.5 flex justify-between items-center">
               <span className="text-slate-400">P/E Ratio</span>
-              <span className="font-semibold text-slate-800">{stock?.pe_ratio || '24.8'}</span>
+              <span className="font-semibold text-slate-800">{stock?.pe_ratio ?? '—'}</span>
             </div>
             <div className="py-2.5 flex justify-between items-center">
               <span className="text-slate-400">Dividend Yield</span>
               <span className="font-semibold text-slate-800">
-                {stock?.dividend_yield ? `${stock.dividend_yield}%` : '0.8%'}
+                {stock?.dividend_yield !== undefined && stock.dividend_yield !== null
+                  ? `${stock.dividend_yield}%`
+                  : '—'}
               </span>
             </div>
             <div className="py-2.5 flex justify-between items-center">
               <span className="text-slate-400">Sector</span>
-              <span className="font-semibold text-zinc-900">{stock?.sector || 'Diversified'}</span>
+              <span className="font-semibold text-zinc-900">{stock?.sector || '—'}</span>
+            </div>
+            <div className="py-2.5 flex justify-between items-center">
+              <span className="text-slate-400">Last Updated</span>
+              <span
+                className="font-semibold text-slate-800"
+                title={quote?.updated_at ? `${formatISTDateTime(quote.updated_at)} IST` : undefined}
+              >
+                {quote?.updated_at ? `${formatISTTime(quote.updated_at)} IST` : '—'}
+              </span>
             </div>
           </div>
 
@@ -462,7 +513,7 @@ export const StockDetail: React.FC = () => {
             price: currentPrice,
           }}
           initialSide={orderSide}
-          onOrderSuccess={fetchStockDetail}
+          onOrderSuccess={refreshStock}
         />
       )}
     </div>

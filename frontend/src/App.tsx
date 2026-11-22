@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import api from './api/client';
 import { Layout } from './components/layout/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { StockDetail } from './pages/StockDetail';
@@ -38,6 +39,14 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     checkAuth();
+    // Every app open/window reload forces a fresh quote snapshot so prices,
+    // holdings and the "Updated ..." badge reflect the latest available data.
+    api
+      .post('/market/refresh')
+      .then(() => window.dispatchEvent(new Event('market-refreshed')))
+      .catch(() => {
+        // Best effort: the backend also refreshes on startup and every minute.
+      });
   }, [checkAuth]);
 
   return (

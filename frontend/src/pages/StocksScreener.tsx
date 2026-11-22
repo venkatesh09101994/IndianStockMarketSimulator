@@ -5,6 +5,7 @@ import api from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 import { OrderModal } from '../components/trading/OrderModal';
 import { CompanyLogo } from '../components/common/CompanyLogo';
+import { formatISTTime, parseBackendDate, timeAgo } from '../utils/datetime';
 
 const SCR_CACHE = { search: '', selectedSector: 'All', sortKey: 'change' };
 export const StocksScreener: React.FC = () => {
@@ -18,6 +19,7 @@ export const StocksScreener: React.FC = () => {
   const [orderStock, setOrderStock] = useState<any | null>(null);
   const [onlineResults, setOnlineResults] = useState<any[]>([]);
   const [onlineLoading, setOnlineLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
   const sectors = [
     'All',
@@ -37,6 +39,14 @@ export const StocksScreener: React.FC = () => {
       setLoading(true);
       const res = await api.get(`/stocks?search=${encodeURIComponent(search)}&sector=${encodeURIComponent(selectedSector)}&sort=${sortKey}`);
       setStocks(res.data);
+
+      const times: Date[] = (res.data || [])
+        .map((s: any) => parseBackendDate(s?.quote?.updated_at))
+        .filter((d: Date | null): d is Date => d !== null);
+      if (times.length > 0) {
+        const newest = new Date(Math.max(...times.map((d) => d.getTime())));
+        setLastUpdated(newest.toISOString());
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -111,7 +121,11 @@ export const StocksScreener: React.FC = () => {
         </div>
         <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-500 bg-white px-3 py-1.5 rounded-xl border border-slate-200/80 shadow-sm self-start sm:self-auto">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span>15m Delayed • Updates every 1 min</span>
+          <span>
+            {lastUpdated
+              ? `15m Delayed • Updated ${formatISTTime(lastUpdated)} IST (${timeAgo(lastUpdated)})`
+              : '15m Delayed • Updates every 1 min'}
+          </span>
         </div>
       </div>
 

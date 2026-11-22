@@ -204,12 +204,32 @@ def execute_decision(db: Session, user: User, decision_id: int) -> Dict[str, Any
     row = db.query(AIDecision).filter(AIDecision.id == decision_id, AIDecision.user_id == user.id).first()
     if not row:
         return {'error': 'Decision not found'}
+    if row.executed:
+        return {'error': 'Decision already executed'}
     if row.action == 'HOLD':
         row.executed = 1
         db.commit()
         return {'message': 'HOLD - no order placed', 'decision_id': row.id}
     if row.quantity <= 0:
         return {'error': 'Quantity must be > 0'}
+
+    # Claim the decision before placing the order so a repeated or concurrent
+    # request cannot execute the same decision twice.
+    claim = (
+        db.query(AIDecision)
+        .filter(AIDecision.id == decision_id, AIDecision.user_id == user.id, AIDecision.executed == 0)
+        .update({'executed': 1}, synchronize_session=False)
+    )
+    db.commit()
+    if not claim:
+        return {'error': 'Decision already executed'}
+
+    def _release_claim():
+        db.rollback()
+        db.query(AIDecision).filter(AIDecision.id == decision_id).update(
+            {'executed': 0}, synchronize_session=False
+        )
+        db.commit()
 
     # Use existing order service
     from app.services.order_service import place_order
@@ -223,30 +243,35 @@ def execute_decision(db: Session, user: User, decision_id: int) -> Dict[str, Any
     )
     try:
         order = place_order(db, user.id, order_in)
-        row.executed = 1
-        row.order_id = order.id
-        db.commit()
-        # Persist to agentmemory for future recall
-        try:
-            from app.services.agentmemory import remember, is_available
-            if is_available():
-                remember(
-                    content=f"AI {row.action} {row.quantity} {row.symbol} @ {getattr(order,'execution_price',None)}. Confidence {row.confidence}. Reasoning: {row.reasoning}. Model: {row.model}.",
-                    concepts=[row.symbol, row.action, row.model, 'trade'],
-                    project='stock-simulator',
-                )
-        except Exception:
-            pass
-        return {
-            'message': f'{row.action} executed',
-            'decision_id': row.id,
-            'order_id': order.id,
-            'symbol': row.symbol,
-            'side': row.action,
-            'quantity': row.quantity,
-            'execution_price': getattr(order, 'execution_price', None),
-            'status': getattr(order, 'status', None),
-        }
     except Exception as e:
+        _release_claim()
         logger.exception('Order execution failed')
         return {'error': f'Execution failed: {e}'}
+
+    db.query(AIDecision).filter(AIDecision.id == decision_id).update(
+        {'order_id': order.id}, synchronize_session=False
+    )
+    db.commit()
+
+    trade_price = order.trades[-1].price if order.trades else None
+    # Persist to agentmemory for future recall
+    try:
+        from app.services.agentmemory import remember, is_available
+        if is_available():
+            remember(
+                content=f"AI {row.action} {row.quantity} {row.symbol} @ {trade_price}. Confidence {row.confidence}. Reasoning: {row.reasoning}. Model: {row.model}.",
+                concepts=[row.symbol, row.action, row.model, 'trade'],
+                project='stock-simulator',
+            )
+    except Exception:
+        pass
+    return {
+        'message': f'{row.action} executed',
+        'decision_id': row.id,
+        'order_id': order.id,
+        'symbol': row.symbol,
+        'side': row.action,
+        'quantity': row.quantity,
+        'execution_price': round(trade_price / 100.0, 2) if trade_price is not None else None,
+        'status': order.status,
+    }

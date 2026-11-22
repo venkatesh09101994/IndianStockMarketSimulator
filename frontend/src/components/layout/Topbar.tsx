@@ -17,11 +17,14 @@ import api from '../../api/client';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useNotificationStore } from '../../store/useNotificationStore';
 import { CompanyLogo } from '../common/CompanyLogo';
+import { formatISTDateKey, formatISTDateTime, formatISTTime, timeAgo } from '../../utils/datetime';
 
 interface MarketStatus {
   is_open: boolean;
   status_text: string;
   replay_mode: boolean;
+  last_updated?: string | null;
+  data_age_seconds?: number | null;
 }
 
 export const Topbar: React.FC = () => {
@@ -40,6 +43,9 @@ export const Topbar: React.FC = () => {
 
   const notifRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  // fetchStatus runs on a long interval, so read the latest user via a ref.
+  const userRef = useRef(user);
+  userRef.current = user;
 
   // Close menus on outside click
   useEffect(() => {
@@ -99,15 +105,16 @@ export const Topbar: React.FC = () => {
     // Independent notification check for day close - strictly once per day!
     try {
       const statusRes = await api.get('/market/status');
-      if (!statusRes.data.is_open && user) {
-        const todayKey = new Date().toISOString().slice(0, 10);
-        const storageKey = `day_close_notif_${user.id}_${todayKey}`;
+      const currentUser = userRef.current;
+      if (!statusRes.data.is_open && currentUser) {
+        const todayKey = formatISTDateKey();
+        const storageKey = `day_close_notif_${currentUser.id}_${todayKey}`;
         const alreadyFiredToday = localStorage.getItem(storageKey);
 
         if (!alreadyFiredToday) {
           const currentNotifs = useNotificationStore.getState().notifications;
           const hasInStore = currentNotifs.some(
-            (n) => n.type === 'DAY_CLOSE' && (n.dateKey === todayKey || n.id.includes(todayKey))
+            (n) => n.type === 'DAY_CLOSE' && (n.dateKey === todayKey || n.id?.includes(todayKey))
           );
           if (!hasInStore) {
             localStorage.setItem(storageKey, 'true');
@@ -133,8 +140,13 @@ export const Topbar: React.FC = () => {
 
   useEffect(() => {
     fetchStatus();
+    const handleMarketRefreshed = () => fetchStatus();
+    window.addEventListener('market-refreshed', handleMarketRefreshed);
     const interval = setInterval(fetchStatus, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('market-refreshed', handleMarketRefreshed);
+    };
   }, []);
 
   useEffect(() => {
@@ -211,6 +223,19 @@ export const Topbar: React.FC = () => {
               }`}
             />
             <span>{marketStatus.status_text}</span>
+          </div>
+        )}
+
+        {/* Last Updated Pill */}
+        {marketStatus?.last_updated && (
+          <div
+            className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold text-slate-500 bg-slate-50 border border-slate-200/80"
+            title={`Market data last refreshed: ${formatISTDateTime(marketStatus.last_updated)} IST`}
+          >
+            <Clock className="w-3.5 h-3.5 text-slate-400" />
+            <span>Updated {formatISTTime(marketStatus.last_updated)} IST</span>
+            <span className="text-slate-300">•</span>
+            <span className="text-slate-400">{timeAgo(marketStatus.last_updated)}</span>
           </div>
         )}
 

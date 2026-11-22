@@ -12,6 +12,8 @@ export interface HoldingToSell {
   avg_buy_price: number;
   current_price: number;
   product_type?: 'CNC' | 'MIS';
+  /** Closing leg: SELL for long holdings, BUY to cover a short MIS position. */
+  side?: 'BUY' | 'SELL';
 }
 
 interface SellConfirmationModalProps {
@@ -55,10 +57,13 @@ export const SellConfirmationModal: React.FC<SellConfirmationModalProps> = ({
 
   const currentPrice = holding.current_price;
   const avgBuyPrice = holding.avg_buy_price;
+  const side = holding.side || 'SELL';
+  const isCover = side === 'BUY';
+  const pnlDirection = isCover ? -1 : 1;
   const sellQty = Math.max(1, Math.min(quantity, holding.quantity));
   const estimatedTotal = sellQty * currentPrice;
-  const estimatedPnL = (currentPrice - avgBuyPrice) * sellQty;
-  const estimatedPnLPct = avgBuyPrice > 0 ? ((currentPrice - avgBuyPrice) / avgBuyPrice) * 100 : 0;
+  const estimatedPnL = (currentPrice - avgBuyPrice) * sellQty * pnlDirection;
+  const estimatedPnLPct = avgBuyPrice > 0 ? ((currentPrice - avgBuyPrice) / avgBuyPrice) * 100 * pnlDirection : 0;
   const productType = holding.product_type || 'CNC';
 
   const formatCurrency = (val: number) => {
@@ -76,7 +81,7 @@ export const SellConfirmationModal: React.FC<SellConfirmationModalProps> = ({
     try {
       const payload = {
         symbol: holding.symbol,
-        side: 'SELL',
+        side,
         product_type: productType,
         order_type: 'MARKET',
         quantity: sellQty,
@@ -97,13 +102,14 @@ export const SellConfirmationModal: React.FC<SellConfirmationModalProps> = ({
       const soldPrice = data.execution_price || currentPrice;
       const actualPnL = data.realized_pnl !== null && data.realized_pnl !== undefined
         ? data.realized_pnl
-        : (soldPrice - avgBuyPrice) * sellQty;
+        : (soldPrice - avgBuyPrice) * sellQty * pnlDirection;
       const pnlPct = avgBuyPrice > 0 ? (actualPnL / (avgBuyPrice * sellQty)) * 100 : 0;
+      const action = isCover ? 'Covered' : 'Sold';
 
       // Push notification to bell
       addNotification({
-        title: `Sold ${sellQty} ${holding.symbol}`,
-        message: `Sold ${sellQty} shares of ${holding.symbol} @ ₹${soldPrice.toFixed(2)}. Realized P&L: ${actualPnL >= 0 ? '+' : ''}${formatCurrency(actualPnL)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`,
+        title: `${action} ${sellQty} ${holding.symbol}`,
+        message: `${action} ${sellQty} shares of ${holding.symbol} @ ₹${soldPrice.toFixed(2)}. Realized P&L: ${actualPnL >= 0 ? '+' : ''}${formatCurrency(actualPnL)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`,
         type: 'SELL',
         symbol: holding.symbol,
         price: soldPrice,
@@ -139,8 +145,12 @@ export const SellConfirmationModal: React.FC<SellConfirmationModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-black text-base text-slate-900">{holding.symbol}</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 font-bold border border-rose-200">
-                  SELL CONFIRMATION
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                  isCover
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : 'bg-rose-50 text-rose-700 border-rose-200'
+                }`}>
+                  {isCover ? 'BUY TO COVER' : 'SELL CONFIRMATION'}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 truncate max-w-xs">{holding.company_name}</p>
@@ -179,13 +189,15 @@ export const SellConfirmationModal: React.FC<SellConfirmationModalProps> = ({
                     : 'text-rose-700 bg-rose-50 border-rose-200'
                 }`}
               >
-                {soldResult.realizedPnL >= 0 ? 'Sold with Profit' : 'Sold with Loss'}
+                {isCover ? 'Position Closed' : (soldResult.realizedPnL >= 0 ? 'Sold with Profit' : 'Sold with Loss')}
               </span>
               <h2 className="text-2xl font-black text-slate-900 mt-2">
-                {soldResult.quantity} Shares Sold
+                {soldResult.quantity} Shares {isCover ? 'Covered' : 'Sold'}
               </h2>
               <p className="text-xs text-slate-500 font-medium mt-1">
-                Cash has been credited back to your virtual trading wallet.
+                {isCover
+                  ? 'Your short position has been closed at the current market price.'
+                  : 'Cash has been credited back to your virtual trading wallet.'}
               </p>
             </div>
 
@@ -196,31 +208,31 @@ export const SellConfirmationModal: React.FC<SellConfirmationModalProps> = ({
                 <span className="font-bold text-slate-900">{holding.symbol}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-500 font-medium">Quantity Sold:</span>
+                <span className="text-slate-500 font-medium">Quantity {isCover ? 'Covered' : 'Sold'}:</span>
                 <span className="font-bold text-slate-900">{soldResult.quantity} Shares</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-500 font-medium">Selling Price (LTP):</span>
+                <span className="text-slate-500 font-medium">{isCover ? 'Buyback Price (LTP):' : 'Selling Price (LTP):'}</span>
                 <span className="font-black text-slate-950 text-sm">
                   ₹{soldResult.soldPrice.toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-500 font-medium">Total Cash Credited:</span>
+                <span className="text-slate-500 font-medium">{isCover ? 'Total Cash Debited:' : 'Total Cash Credited:'}</span>
                 <span className="font-black text-slate-900">
                   {formatCurrency(soldResult.totalAmount)}
                 </span>
               </div>
               <div className="flex justify-between items-center pt-2 border-t border-slate-200">
-                <span className="text-slate-800 font-bold">Realized Profit / Loss:</span>
+                <span className="text-slate-800 font-bold">Realized P&amp;L:</span>
                 <span
                   className={`font-black text-base ${
                     soldResult.realizedPnL >= 0 ? 'text-emerald-600' : 'text-rose-600'
                   }`}
                 >
-                  {soldResult.realizedPnL >= 0 ? '+' : ''}
-                  {formatCurrency(soldResult.realizedPnL)} ({soldResult.pnlPct >= 0 ? '+' : ''}
-                  {soldResult.pnlPct.toFixed(2)}%)
+                  {soldResult.realizedPnL >= 0 ? '+' : '-'}
+                  {formatCurrency(Math.abs(soldResult.realizedPnL))} ({soldResult.pnlPct >= 0 ? '+' : '-'}
+                  {Math.abs(soldResult.pnlPct).toFixed(2)}%)
                 </span>
               </div>
             </div>
@@ -237,17 +249,17 @@ export const SellConfirmationModal: React.FC<SellConfirmationModalProps> = ({
           <div className="p-6 space-y-5">
             <div>
               <h3 className="text-base font-black text-slate-900">
-                Do you want to sell {holding.symbol}?
+                Do you want to {isCover ? 'buy back' : 'sell'} {holding.symbol}?
               </h3>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Choose how many shares you would like to sell from your position.
+                Choose how many shares you would like to {isCover ? 'cover' : 'sell'} from your position.
               </p>
             </div>
 
             {/* Quantity Selector */}
             <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-slate-700">Quantity to Sell:</span>
+                <span className="font-bold text-slate-700">Quantity to {isCover ? 'Cover' : 'Sell'}:</span>
                 <span className="text-slate-500 text-[11px]">
                   Total Available: <strong className="text-slate-800">{holding.quantity} Shares</strong>
                 </span>
@@ -270,7 +282,7 @@ export const SellConfirmationModal: React.FC<SellConfirmationModalProps> = ({
                   onClick={() => setQuantity(holding.quantity)}
                   className="px-3 py-2 rounded-xl bg-zinc-900 hover:bg-black text-white font-bold text-xs transition-colors"
                 >
-                  Sell All ({holding.quantity})
+                  {isCover ? 'Cover All' : 'Sell All'} ({holding.quantity})
                 </button>
               </div>
 
@@ -308,7 +320,7 @@ export const SellConfirmationModal: React.FC<SellConfirmationModalProps> = ({
                 <span className="font-bold text-slate-900">₹{avgBuyPrice.toFixed(2)}</span>
               </div>
               <div className="flex justify-between items-center text-slate-600">
-                <span>Current LTP (Selling At):</span>
+                <span>Current LTP ({isCover ? 'Buying At' : 'Selling At'}):</span>
                 <span className="font-bold text-slate-900">₹{currentPrice.toFixed(2)}</span>
               </div>
               <div className="flex justify-between items-center text-slate-600">
@@ -316,16 +328,16 @@ export const SellConfirmationModal: React.FC<SellConfirmationModalProps> = ({
                 <span className="font-bold text-slate-900">{formatCurrency(estimatedTotal)}</span>
               </div>
               <div className="flex justify-between items-center pt-2 border-t border-zinc-200">
-                <span className="font-bold text-slate-800">Estimated Profit / Loss:</span>
+                <span className="font-bold text-slate-800">Estimated P&amp;L:</span>
                 <span
                   className={`font-black text-sm flex items-center gap-1 ${
                     estimatedPnL >= 0 ? 'text-emerald-600' : 'text-rose-600'
                   }`}
                 >
                   {estimatedPnL >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                  {estimatedPnL >= 0 ? '+' : ''}
-                  {formatCurrency(estimatedPnL)} ({estimatedPnLPct >= 0 ? '+' : ''}
-                  {estimatedPnLPct.toFixed(2)}%)
+                  {estimatedPnL >= 0 ? '+' : '-'}
+                  {formatCurrency(Math.abs(estimatedPnL))} ({estimatedPnLPct >= 0 ? '+' : '-'}
+                  {Math.abs(estimatedPnLPct).toFixed(2)}%)
                 </span>
               </div>
             </div>
@@ -354,7 +366,7 @@ export const SellConfirmationModal: React.FC<SellConfirmationModalProps> = ({
                 disabled={loading}
                 className="py-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs shadow-md shadow-rose-200 transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
               >
-                {loading ? 'Selling...' : `Confirm & Sell ${sellQty} Shares`}
+                {loading ? (isCover ? 'Covering...' : 'Selling...') : `Confirm & ${isCover ? 'Cover' : 'Sell'} ${sellQty} Shares`}
               </button>
             </div>
           </div>

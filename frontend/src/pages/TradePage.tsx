@@ -4,6 +4,9 @@ import { ArrowLeft, ShieldCheck, AlertCircle, CheckCircle2, TrendingUp, Trending
 import api from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 
+const defaultTrigger = (side: 'BUY' | 'SELL', price: number) =>
+  (price * (side === 'BUY' ? 1.05 : 0.95)).toFixed(2);
+
 export const TradePage: React.FC = () => {
   const { symbol = 'RELIANCE' } = useParams<{ symbol: string }>();
   const navigate = useNavigate();
@@ -27,7 +30,7 @@ export const TradePage: React.FC = () => {
         setStock(res.data);
         if (res.data.quote) {
           setLimitPrice(res.data.quote.price.toFixed(2));
-          setTriggerPrice((res.data.quote.price * 0.95).toFixed(2));
+          setTriggerPrice(defaultTrigger(side, res.data.quote.price));
         }
       } catch (e) {
         console.error(e);
@@ -37,6 +40,7 @@ export const TradePage: React.FC = () => {
   }, [symbol]);
 
   const currentPrice = stock?.quote?.price || 2500;
+  const dayChangePct: number | undefined = stock?.quote?.day_change_pct;
   const effectivePrice = orderType === 'LIMIT' ? (parseFloat(limitPrice) || currentPrice) : currentPrice;
   const tradeValue = quantity * effectivePrice;
   const requiredFunds = productType === 'MIS' ? tradeValue * 0.2 : (side === 'BUY' ? tradeValue : 0);
@@ -47,6 +51,30 @@ export const TradePage: React.FC = () => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
+
+    if (orderType === 'LIMIT') {
+      const limit = parseFloat(limitPrice);
+      if (!Number.isFinite(limit) || limit <= 0) {
+        setError('Enter a valid limit price.');
+        return;
+      }
+    }
+    if (orderType === 'SL_M') {
+      const trigger = parseFloat(triggerPrice);
+      if (!Number.isFinite(trigger) || trigger <= 0) {
+        setError('Enter a valid trigger price.');
+        return;
+      }
+      if (side === 'BUY' && trigger <= currentPrice) {
+        setError('BUY stop-loss trigger must be above the current market price.');
+        return;
+      }
+      if (side === 'SELL' && trigger >= currentPrice) {
+        setError('SELL stop-loss trigger must be below the current market price.');
+        return;
+      }
+    }
+
     setLoading(true);
 
     try {
@@ -123,8 +151,16 @@ export const TradePage: React.FC = () => {
 
           <div className="text-right">
             <span className="text-2xl font-black text-slate-900">₹{currentPrice.toFixed(2)}</span>
-            <p className="text-xs font-bold text-emerald-600">
-              +{stock?.quote?.day_change_pct ? stock.quote.day_change_pct.toFixed(2) : '1.42'}% Today
+            <p className={`text-xs font-bold ${
+              dayChangePct === undefined || dayChangePct === null
+                ? 'text-slate-400'
+                : dayChangePct >= 0
+                ? 'text-emerald-600'
+                : 'text-rose-600'
+            }`}>
+              {dayChangePct === undefined || dayChangePct === null
+                ? '— Today'
+                : `${dayChangePct >= 0 ? '+' : ''}${dayChangePct.toFixed(2)}% Today`}
             </p>
           </div>
         </div>
@@ -139,7 +175,10 @@ export const TradePage: React.FC = () => {
               <div className="grid grid-cols-2 gap-2 p-1.5 bg-slate-100 rounded-2xl">
                 <button
                   type="button"
-                  onClick={() => setSide('BUY')}
+                  onClick={() => {
+                    setSide('BUY');
+                    setTriggerPrice(defaultTrigger('BUY', currentPrice));
+                  }}
                   className={`py-2.5 rounded-xl text-xs font-bold transition-all ${
                     side === 'BUY'
                       ? 'bg-emerald-600 text-white shadow-md'
@@ -150,7 +189,10 @@ export const TradePage: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSide('SELL')}
+                  onClick={() => {
+                    setSide('SELL');
+                    setTriggerPrice(defaultTrigger('SELL', currentPrice));
+                  }}
                   className={`py-2.5 rounded-xl text-xs font-bold transition-all ${
                     side === 'SELL'
                       ? 'bg-rose-600 text-white shadow-md'

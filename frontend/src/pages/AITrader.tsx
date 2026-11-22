@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import api from '../api/client';
+import { formatISTTime } from '../utils/datetime';
 
 interface Decision {
   id: number;
@@ -100,6 +101,11 @@ export const AITrader: React.FC = () => {
       const res = await api.post('/ai/analyze', { symbol: symbol.toUpperCase() });
       setDecision(res.data);
       fetchHistory();
+      if (res.data?.error) {
+        setMsgType('err');
+        setMsg(res.data.error);
+        return;
+      }
       setMsgType('ok');
       setMsg('Analysis complete');
     } catch (e: any) {
@@ -116,8 +122,14 @@ export const AITrader: React.FC = () => {
     setMsg('');
     try {
       const res = await api.post('/ai/execute', { decision_id: decision.id });
+      if (res.data?.error) {
+        setMsgType('err');
+        setMsg(res.data.error);
+        return;
+      }
       setMsgType('ok');
       setMsg(res.data?.message || 'Executed');
+      setDecision((prev: any) => (prev ? { ...prev, executed: true } : prev));
       fetchHistory();
     } catch (e: any) {
       setMsgType('err');
@@ -311,7 +323,7 @@ export const AITrader: React.FC = () => {
               )}
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <span className="text-xs text-slate-400 font-mono">Model: {decision.model}</span>
-                {decision.action !== 'HOLD' && decision.quantity > 0 && (
+                {!decision.executed && decision.action !== 'HOLD' && decision.quantity > 0 && (
                   <button
                     onClick={execute}
                     disabled={executing}
@@ -358,7 +370,7 @@ export const AITrader: React.FC = () => {
             <tbody>
               {history.map(h => (
                 <tr key={h.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                  <td className="py-2.5 text-slate-400 text-xs font-mono">{h.created_at ? new Date(h.created_at).toLocaleTimeString() : ''}</td>
+                  <td className="py-2.5 text-slate-400 text-xs font-mono">{formatISTTime(h.created_at)}</td>
                   <td className="py-2.5 text-slate-900 font-bold">{h.symbol}</td>
                   <td className={`py-2.5 font-black font-mono ${actionColor(h.action)}`}>{h.action}</td>
                   <td className="py-2.5 text-right text-slate-700 font-mono">{h.quantity}</td>

@@ -18,7 +18,7 @@ from app.schemas.admin import AccountResetResponse
 router = APIRouter(tags=['Admin'])
 
 @router.post('/admin/replay/start')
-def start_replay(db: Session = Depends(get_db)):
+def start_replay(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     state = db.query(AppState).filter(AppState.key == 'replay_mode').first()
     if not state:
         state = AppState(key='replay_mode', value='true')
@@ -29,7 +29,7 @@ def start_replay(db: Session = Depends(get_db)):
     return {'message': 'Replay mode enabled', 'replay_mode': True}
 
 @router.post('/admin/replay/stop')
-def stop_replay(db: Session = Depends(get_db)):
+def stop_replay(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     state = db.query(AppState).filter(AppState.key == 'replay_mode').first()
     if state:
         state.value = 'false'

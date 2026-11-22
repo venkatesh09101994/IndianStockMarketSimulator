@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, BigInteger, String, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.db import Base
 
@@ -20,6 +20,10 @@ class Trade(Base):
     realized_pnl = Column(BigInteger, nullable=True)  # paise
     reason = Column(String(30), default='USER', nullable=False)  # USER | LIMIT_HIT | SL_HIT | SQUARE_OFF | GAP_FILL
     executed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('order_id', name='uix_trades_order_id'),
+    )
 
     order = relationship('Order', back_populates='trades')
     user = relationship('User', back_populates='trades')

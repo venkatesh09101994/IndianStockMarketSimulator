@@ -1,6 +1,7 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { ArrowLeftRight, XCircle, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
 import api from '../api/client';
+import { formatISTTime } from '../utils/datetime';
 
 export const Orders: React.FC = () => {
   const [orders, setOrders] = useState<any[]>([]);
@@ -83,7 +84,7 @@ export const Orders: React.FC = () => {
               <tbody className="divide-y divide-slate-100">
                 {orders.map((o) => (
                   <tr key={o.id} className="hover:bg-slate-50/70">
-                    <td className="py-3.5 pl-6 text-slate-500">{new Date(o.created_at).toLocaleTimeString('en-IN')}</td>
+                    <td className="py-3.5 pl-6 text-slate-500">{formatISTTime(o.created_at)}</td>
                     <td className="py-3.5 font-bold text-slate-900">{o.stock_symbol}</td>
                     <td className={`py-3.5 font-bold ${o.side === 'BUY' ? 'text-emerald-600' : 'text-rose-600'}`}>
                       {o.side}

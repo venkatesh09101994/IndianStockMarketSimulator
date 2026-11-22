@@ -70,6 +70,8 @@ class MarketStatusOut(BaseModel):
     current_time_ist: str
     replay_mode: bool
     data_delayed_badge: bool
+    last_updated: Optional[datetime] = None   # UTC timestamp of the latest quote refresh
+    data_age_seconds: Optional[int] = None    # seconds since last quote refresh
 
 class TickerItem(BaseModel):
     symbol: str

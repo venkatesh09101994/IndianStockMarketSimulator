@@ -4,7 +4,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 def _env_file() -> str:
     if getattr(sys, 'frozen', False):
-        return os.path.join(os.path.dirname(sys.executable), '.env')
+        # Prefer a user-editable .env beside the EXE. Fall back to the copy
+        # bundled inside the one-file package so portable builds still work.
+        external_env = os.path.join(os.path.dirname(sys.executable), '.env')
+        if os.path.exists(external_env):
+            return external_env
+        bundled_env = os.path.join(getattr(sys, '_MEIPASS', os.path.dirname(sys.executable)), '.env')
+        return bundled_env if os.path.exists(bundled_env) else external_env
     return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
 
 class Settings(BaseSettings):

@@ -9,6 +9,7 @@ from app.models.watchlist import WatchlistItem
 from app.schemas.watchlist import WatchlistItemOut
 from app.schemas.stock import StockBrief
 from app.api.stocks import quote_to_out
+from app.utils.time import to_utc
 
 router = APIRouter(prefix='/watchlist', tags=['Watchlist'])
 
@@ -34,7 +35,7 @@ def get_watchlist(db: Session = Depends(get_db), current_user: User = Depends(ge
             quote=q_out,
             in_watchlist=True
         )
-        results.append(WatchlistItemOut(id=it.id, stock=brief, created_at=it.created_at))
+        results.append(WatchlistItemOut(id=it.id, stock=brief, created_at=to_utc(it.created_at)))
     return results
 
 @router.post('/{symbol}')

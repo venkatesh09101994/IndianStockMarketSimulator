@@ -36,10 +36,20 @@ def square_off_mis_positions(db: Session):
 
     db.commit()
 
+    today_ist = get_ist_now().strftime('%Y-%m-%d')
     open_positions = db.query(Position).filter(
         Position.is_open == True,
-        Position.net_quantity != 0
+        Position.net_quantity != 0,
+        Position.trade_date == today_ist
     ).all()
+
+    stale_positions = db.query(Position).filter(
+        Position.is_open == True,
+        Position.net_quantity != 0,
+        Position.trade_date != today_ist
+    ).count()
+    if stale_positions:
+        logger.warning(f'Skipping {stale_positions} MIS position(s) from an earlier session')
 
     for pos in open_positions:
         try:

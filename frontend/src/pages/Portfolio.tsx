@@ -16,6 +16,7 @@ import { OrderModal } from '../components/trading/OrderModal';
 import { SellConfirmationModal, HoldingToSell } from '../components/trading/SellConfirmationModal';
 import { CompanyLogo } from '../components/common/CompanyLogo';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
+import { formatISTTime } from '../utils/datetime';
 
 export const Portfolio: React.FC = () => {
   const navigate = useNavigate();
@@ -363,6 +364,7 @@ export const Portfolio: React.FC = () => {
                                 avg_buy_price: p.avg_price,
                                 current_price: p.current_price,
                                 product_type: 'MIS',
+                                side: p.net_quantity < 0 ? 'BUY' : 'SELL',
                               });
                             }}
                             className="px-3 py-1 rounded-xl bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold text-xs border border-rose-200 transition-colors"
@@ -407,10 +409,7 @@ export const Portfolio: React.FC = () => {
                   {trades.map((t) => (
                     <tr key={t.id} className="hover:bg-slate-50/70 transition-colors">
                       <td className="py-3.5 pl-6 text-slate-500 text-[11px]">
-                        {new Date(t.executed_at).toLocaleTimeString('en-IN', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
+                        {formatISTTime(t.executed_at, false)}
                       </td>
                       <td className="py-3.5 font-bold text-slate-900">{t.stock_symbol}</td>
                       <td className="py-3.5">

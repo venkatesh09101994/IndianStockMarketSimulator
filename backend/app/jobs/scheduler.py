@@ -7,7 +7,7 @@ from app.db import SessionLocal
 from app.config import settings
 from app.models.stock import Stock, LatestQuote, PriceHistory
 from app.providers import get_active_provider
-from app.services.market_clock import is_market_open, is_replay_mode
+from app.services.market_clock import is_market_open, is_replay_mode, get_ist_now, IST
 from app.services.order_engine import run_order_engine
 from app.services.square_off import square_off_mis_positions
 from app.services.snapshot_service import take_daily_snapshots
@@ -16,12 +16,25 @@ from app.services.ai_auto_trader import run_auto_trader
 logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler(timezone='Asia/Kolkata')
 
-def job_refresh_quotes():
-    db = SessionLocal()
-    try:
-        if not is_market_open(db):
-            return
 
+def _is_same_ist_day(dt, now_ist) -> bool:
+    """True when a stored UTC timestamp falls on the same IST trading day."""
+    if dt is None:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IST).date() == now_ist.date()
+
+def job_refresh_quotes(db=None):
+    """Refresh quotes and their timestamps even outside trading hours.
+
+    Market hours control whether orders are allowed; they must not freeze the
+    market data feed. Otherwise a portable app reopened days later keeps showing
+    a stale "Updated Xd ago" timestamp and stale holdings values.
+    """
+    owns_db = db is None
+    db = db or SessionLocal()
+    try:
         is_rep = is_replay_mode(db)
         provider = get_active_provider(is_rep)
         stocks = db.query(Stock).filter(Stock.is_active == True).all()
@@ -32,12 +45,17 @@ def job_refresh_quotes():
             return
 
         now_utc = datetime.now(timezone.utc)
+        now_ist = get_ist_now()
         for s in stocks:
             q_data = quotes.get(s.yf_symbol)
             if not q_data:
                 continue
 
             quote = s.quote
+            # Day high/low belong to a single session. Only extend the stored
+            # values when the previous refresh happened on the same IST day,
+            # otherwise reset them so they don't drift across days.
+            same_day = _is_same_ist_day(quote.updated_at if quote else None, now_ist)
             if not quote:
                 quote = LatestQuote(stock_id=s.id)
                 db.add(quote)
@@ -45,19 +63,25 @@ def job_refresh_quotes():
             quote.price = q_data['price']
             quote.prev_close = q_data['prev_close']
             quote.open = q_data['open']
-            quote.day_high = max(quote.day_high, q_data['day_high']) if quote.day_high else q_data['day_high']
-            quote.day_low = min(quote.day_low, q_data['day_low']) if quote.day_low else q_data['day_low']
+            if same_day:
+                quote.day_high = max(quote.day_high or 0, q_data['day_high'])
+                quote.day_low = min(quote.day_low or q_data['day_low'], q_data['day_low'])
+            else:
+                quote.day_high = q_data['day_high']
+                quote.day_low = q_data['day_low']
             quote.volume = q_data['volume']
             quote.day_change = q_data['day_change']
             quote.day_change_pct = q_data['day_change_pct']
             quote.updated_at = now_utc
 
         db.commit()
+        logger.info('Refreshed %d stock quotes', len(quotes))
     except Exception as e:
         db.rollback()
         logger.error(f'Error in job_refresh_quotes: {e}')
     finally:
-        db.close()
+        if owns_db:
+            db.close()
 
 def job_order_engine():
     db = SessionLocal()

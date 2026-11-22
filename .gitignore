@@ -41,3 +41,7 @@ Thumbs.db
 build/
 data/
 *.exe
+
+# The portable EXE is intentionally committed for release
+!dist/
+!dist/StockMarketSimulator.exe

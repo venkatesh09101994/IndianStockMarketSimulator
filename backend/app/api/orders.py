@@ -6,6 +6,7 @@ from app.models.user import User
 from app.models.order import Order
 from app.schemas.order import OrderCreate, OrderOut
 from app.services.order_service import place_order, cancel_order
+from app.utils.time import to_utc
 
 router = APIRouter(prefix='/orders', tags=['Orders'])
 
@@ -33,8 +34,8 @@ def order_to_out(o: Order) -> OrderOut:
         status=o.status,
         reject_reason=o.reject_reason,
         blocked_amount=round(o.blocked_amount / 100.0, 2),
-        created_at=o.created_at,
-        executed_at=o.executed_at,
+        created_at=to_utc(o.created_at),
+        executed_at=to_utc(o.executed_at),
         execution_price=exec_price,
         realized_pnl=realized_pnl
     )

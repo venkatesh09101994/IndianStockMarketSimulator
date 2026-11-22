@@ -11,6 +11,7 @@ import {
   Cell,
   CartesianGrid,
 } from 'recharts';
+import { parseBackendDate } from '../../utils/datetime';
 
 export interface CandleData {
   ts: string;
@@ -47,15 +48,24 @@ export const StockAreaChart: React.FC<StockAreaChartProps> = ({
 
   // Format data safely
   const formattedData = candles.map((c) => {
-    const d = new Date(c.ts);
-    let label = d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+    const d = parseBackendDate(c.ts) || new Date(c.ts);
+    let label = d.toLocaleDateString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      month: 'short',
+      day: 'numeric',
+    });
     if (selectedRange === '1D') {
-      label = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      label = d.toLocaleTimeString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
     }
     return {
       ...c,
       displayTime: label,
       fullDate: d.toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
         dateStyle: 'medium',
         timeStyle: selectedRange === '1D' ? 'short' : undefined,
       }),
