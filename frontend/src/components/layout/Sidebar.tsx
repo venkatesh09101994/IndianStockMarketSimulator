@@ -10,6 +10,7 @@ import {
   Settings,
   Brain,
   Network,
+  BarChart3,
 } from 'lucide-react';
 import { SMLogo } from '../common/SMLogo';
 
@@ -27,6 +28,7 @@ export const Sidebar: React.FC = () => {
     { to: '/insights', label: 'Insights', icon: Sparkles },
     { to: '/ai-trader', label: 'AI Trader', icon: Brain },
     { to: '/knowledge-graph', label: 'Knowledge Graph', icon: Network },
+    { to: '/backtest', label: 'Backtest', icon: BarChart3 },
     { to: '/settings', label: 'Settings', icon: Settings },
   ];
 

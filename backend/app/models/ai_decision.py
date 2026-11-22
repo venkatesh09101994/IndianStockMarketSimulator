@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, Float, DateTime, Text, ForeignKey
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.models.base import Base
@@ -18,6 +18,9 @@ class AIDecision(Base):
     dry_run = Column(Integer, default=0)  # 0/1
     scheduled = Column(Integer, default=0)  # 0/1 (auto-trader)
     guardrail_note = Column(String(255), nullable=True)
+    debate_transcript = Column(Text, nullable=True)
+    was_correct = Column(Integer, nullable=True)  # 0/1
+    outcome_pnl = Column(BigInteger, nullable=True)
     order_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

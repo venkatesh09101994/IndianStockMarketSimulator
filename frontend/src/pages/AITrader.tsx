@@ -11,6 +11,9 @@ interface Decision {
   reasoning: string;
   model: string;
   executed: boolean;
+  dry_run?: boolean;
+  scheduled?: boolean;
+  guardrail_note?: string | null;
   order_id?: number;
   created_at?: string;
   context?: any;
@@ -55,6 +58,10 @@ export const AITrader: React.FC = () => {
   const [status, setStatus] = useState<{ reachable: boolean; base_url: string; model: string; memory_available?: boolean } | null>(AI_CACHE.status);
   const [latency, setLatency] = useState<number | null>(AI_CACHE.latency);
   const [decision, setDecision] = useState<any>(AI_CACHE.decision);
+  const [mode, setMode] = useState<'single' | 'debate'>('single');
+  const [debateResult, setDebateResult] = useState<any>(null);
+  const [debateLoading, setDebateLoading] = useState(false);
+  const [accuracy, setAccuracy] = useState<any>(null);
   const [history, setHistory] = useState<Decision[]>(AI_CACHE.history);
   const [loading, setLoading] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -82,6 +89,7 @@ export const AITrader: React.FC = () => {
   useEffect(() => {
     fetchStatus();
     fetchHistory();
+    api.get('/ai/accuracy').then((r) => setAccuracy(r.data)).catch(() => {});
   }, []);
 
   // persist to cache
@@ -113,6 +121,25 @@ export const AITrader: React.FC = () => {
       setMsg(e?.response?.data?.detail || e?.response?.data?.error || e?.message || 'Analyze failed');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const runDebate = async () => {
+    setDebateLoading(true);
+    setDebateResult(null);
+    setMsg('');
+    try {
+      const res = await api.post('/ai/debate', { symbol: symbol.toUpperCase() });
+      setDebateResult(res.data);
+      setDecision(res.data);
+      fetchHistory();
+      setMsgType('ok');
+      setMsg('Debate complete');
+    } catch (e: any) {
+      setMsgType('err');
+      setMsg(e?.response?.data?.detail || e?.response?.data?.error || e?.message || 'Debate failed');
+    } finally {
+      setDebateLoading(false);
     }
   };
 
@@ -204,6 +231,15 @@ export const AITrader: React.FC = () => {
         <div className="lg:col-span-1 space-y-4">
           <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm space-y-4">
             <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Input</div>
+            <div className="flex gap-2">
+              <button onClick={() => setMode('single')} className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-bold ${mode === 'single' ? 'bg-zinc-900 text-white' : 'bg-slate-100 text-slate-600'}`}>Single Agent</button>
+              <button onClick={() => setMode('debate')} className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-bold ${mode === 'debate' ? 'bg-zinc-900 text-white' : 'bg-slate-100 text-slate-600'}`}>Multi-Agent Debate</button>
+            </div>
+            {accuracy && (
+              <div className="text-[11px] text-slate-500">
+                Accuracy: <span className="font-bold text-slate-700">{accuracy.accuracy_pct}%</span> ({accuracy.correct}/{accuracy.evaluated} evaluated)
+              </div>
+            )}
             <div>
               <label className="text-slate-500 text-xs mb-1.5 block font-semibold">Symbol</label>
               <input
@@ -214,16 +250,16 @@ export const AITrader: React.FC = () => {
               />
             </div>
             <button
-              onClick={analyze}
-              disabled={loading || !status?.reachable}
+              onClick={mode === 'debate' ? runDebate : analyze}
+              disabled={(mode === 'debate' ? debateLoading : loading) || !status?.reachable}
               className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-all shadow-md shadow-emerald-500/20"
             >
-              {loading ? (
+              {(mode === 'debate' ? debateLoading : loading) ? (
                 <span className="flex items-center justify-center gap-2">
                   <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Analyzing market…
+                  {mode === 'debate' ? 'Debating…' : 'Analyzing market…'}
                 </span>
-              ) : 'Run AI Analysis'}
+              ) : (mode === 'debate' ? 'Run Multi-Agent Debate' : 'Run AI Analysis')}
             </button>
             {msg && (
               <div className={`text-xs px-3 py-2 rounded-lg ${msgType === 'ok' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'}`}>
@@ -301,6 +337,37 @@ export const AITrader: React.FC = () => {
                 <div className="text-[10px] text-slate-400 font-bold uppercase mb-1.5">AI Reasoning</div>
                 <p className="text-slate-700 text-sm leading-relaxed">{decision.reasoning}</p>
               </div>
+              {/* Explainability card */}
+              <div className="bg-white/70 rounded-xl p-4 mb-4 border border-slate-200/60 space-y-2">
+                <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">Explainability</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                  <div className="bg-slate-50 rounded-lg p-2">
+                    <div className="text-slate-400 text-[10px] font-bold uppercase">Action</div>
+                    <div className={`font-black ${actionColor(decision.action)}`}>{decision.action}</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-2">
+                    <div className="text-slate-400 text-[10px] font-bold uppercase">Quantity</div>
+                    <div className="font-black text-slate-900 font-mono">{decision.quantity}</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-2">
+                    <div className="text-slate-400 text-[10px] font-bold uppercase">Confidence</div>
+                    <div className="font-black text-slate-900 font-mono">{(decision.confidence * 100).toFixed(0)}%</div>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-2">
+                    <div className="text-slate-400 text-[10px] font-bold uppercase">Origin</div>
+                    <div className="font-black text-slate-900">{decision.scheduled ? (decision.dry_run ? 'Auto (dry-run)' : 'Auto') : 'Manual'}</div>
+                  </div>
+                </div>
+                {decision.guardrail_note && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-amber-800 text-xs">
+                    <span className="font-bold">Guardrail: </span>{decision.guardrail_note}
+                  </div>
+                )}
+                <div className="text-[10px] text-slate-400">
+                  Risk rules: max 20% of cash per trade · whole shares only · confidence threshold for auto-trader.
+                </div>
+              </div>
+
               {(decision.memory_context || decision.graph_context) && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
                   {decision.memory_context && (
@@ -321,6 +388,24 @@ export const AITrader: React.FC = () => {
                   )}
                 </div>
               )}
+              {debateResult?.transcript && (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 mb-4">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase mb-1.5">Debate Transcript</div>
+                  <pre className="text-slate-700 text-xs whitespace-pre-wrap font-mono">{debateResult.transcript}</pre>
+                  {debateResult.agents && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-3">
+                      {['bull', 'bear', 'risk'].map((k) => (
+                        <div key={k} className="bg-white rounded-lg p-2 border border-slate-200 text-xs">
+                          <div className="font-bold text-slate-600 uppercase text-[10px]">{k}</div>
+                          <div className="font-black text-slate-900">{debateResult.agents[k]?.stance} ({Math.round((debateResult.agents[k]?.confidence || 0) * 100)}%)</div>
+                          <div className="text-slate-500 text-[11px] mt-1">{debateResult.agents[k]?.reasoning}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <span className="text-xs text-slate-400 font-mono">Model: {decision.model}</span>
                 {!decision.executed && decision.action !== 'HOLD' && decision.quantity > 0 && (
