@@ -170,6 +170,19 @@ cd IndianStockMarketSimulator
      cp .env.example .env
      ```
 
+   Key settings in `.env`:
+   * `ALLOW_ANONYMOUS` (default `true`) — desktop builds use one shared local
+     account without login. Set to `false` for any multi-user or network-exposed
+     deployment, and set a unique `JWT_SECRET` when you do.
+   * `COOKIE_SECURE` — enable when the API is served over HTTPS.
+   * `DATABASE_URL` — SQLite path (SQLite runs in WAL mode automatically).
+
+   Market history is fetched from the configured price provider and stored in
+   `price_history`. Charts, 52-week ranges, trailing returns and average volume
+   are derived from those real candles; missing history shows an empty state
+   instead of fabricated data. Daily history, company metadata, order expiry and
+   minute-candle retention are refreshed by the background scheduler.
+
 4. **Seed 100+ Indian Stocks**:
    Populate the database with NIFTY 50 and leading Indian companies and initial price quotes:
    ```bash

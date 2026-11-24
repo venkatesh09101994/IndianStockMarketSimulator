@@ -66,6 +66,26 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f'Stale MIS cleanup failed: {e}')
 
+    # Startup catch-up: expire DAY/GTT orders that missed their deadline while
+    # the process was not running, releasing any blocked cash.
+    try:
+        from app.services.order_service import expire_pending_orders
+        _db = SessionLocal()
+        try:
+            expired = expire_pending_orders(_db)
+            if expired:
+                logger.info('Expired %d stale pending order(s) on startup', expired)
+        finally:
+            _db.close()
+    except Exception as e:
+        logger.warning(f'Order expiry catch-up failed: {e}')
+
+    if not settings.ALLOW_ANONYMOUS and settings.JWT_SECRET == 'stock-sim-jwt-secret-key-3289047239084723':
+        logger.warning(
+            'Authentication is required (ALLOW_ANONYMOUS=false) but JWT_SECRET '
+            'is still the built-in default. Set a unique JWT_SECRET in .env.'
+        )
+
     yield
 
     # Shutdown
@@ -76,9 +96,18 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title='Indian Stock Market Simulator API',
     description='Paper trading engine for NSE with real market data, orders, portfolio & insights',
-    version='1.0.0',
+    version='1.1.0',
     lifespan=lifespan
 )
+
+@app.middleware('http')
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'DENY')
+    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    response.headers.setdefault('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
+    return response
 
 # Setup CORS
 allowed_origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(',') if o.strip()]

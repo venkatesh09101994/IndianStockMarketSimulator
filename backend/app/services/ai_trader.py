@@ -1,11 +1,9 @@
-import os
 import json
 import requests
 import logging
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
-from app.config import settings
-from app.models.stock import Stock, LatestQuote, PriceHistory
+from app.models.stock import Stock, PriceHistory
 from app.models.ai_decision import AIDecision
 from app.models.user import User
 
@@ -17,7 +15,7 @@ def _llm(db=None):
     if db is not None:
         try:
             from app.services.ai_config import get_llm_config
-            c = get_llm_config(db)
+            c = get_llm_config(db, reveal=True)
             return c['base_url'], c['api_key'], c['model']
         except Exception:
             pass

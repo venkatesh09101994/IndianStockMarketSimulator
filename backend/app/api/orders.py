@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.api.deps import get_db, get_current_user
 from app.models.user import User
@@ -36,6 +36,7 @@ def order_to_out(o: Order) -> OrderOut:
         blocked_amount=round(o.blocked_amount / 100.0, 2),
         created_at=to_utc(o.created_at),
         executed_at=to_utc(o.executed_at),
+        expires_at=to_utc(o.expires_at),
         execution_price=exec_price,
         realized_pnl=realized_pnl
     )

@@ -3,6 +3,7 @@ from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from app.db import SessionLocal
+from app.config import settings
 from app.models.user import User
 from app.services.auth_service import decode_access_token
 
@@ -18,7 +19,6 @@ def get_db() -> Generator:
 DEFAULT_USER_EMAIL = 'local@simulator'
 
 def _get_or_create_default_user(db: Session) -> User:
-    from app.config import settings
     from app.models.account import Account
     from app.models.wallet import WalletTransaction
     user = db.query(User).filter(User.email == DEFAULT_USER_EMAIL).first()
@@ -74,7 +74,14 @@ def get_current_user(
             raise unauthorized
         return user
 
-    # No credentials at all: keep the intentional local no-login mode.
+    # No credentials at all: keep the intentional local no-login mode unless
+    # this deployment explicitly requires authentication.
+    if not settings.ALLOW_ANONYMOUS:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail='Authentication required',
+            headers={'WWW-Authenticate': 'Bearer'}
+        )
     return _get_or_create_default_user(db)
 
 def get_optional_current_user(

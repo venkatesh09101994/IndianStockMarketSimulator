@@ -20,7 +20,7 @@ interface AuthState {
   signup: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
-  updateUserBalance: (cash: number) => void;
+  updateUserBalance: (cash: number, starting?: number) => void;
 }
 
 const savedToken = localStorage.getItem('auth_token');
@@ -40,10 +40,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ token });
   },
 
-  updateUserBalance: (cash) => {
+  updateUserBalance: (cash, starting) => {
     const cur = get().user;
     if (cur) {
-      set({ user: { ...cur, cash_balance: cash } });
+      set({
+        user: {
+          ...cur,
+          cash_balance: cash,
+          starting_balance: starting ?? cur.starting_balance,
+        },
+      });
     }
   },
 

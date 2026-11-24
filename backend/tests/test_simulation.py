@@ -107,10 +107,23 @@ def test_full_simulation():
         assert ins_res.status_code == 200
         assert 'gainers' in ins_res.json()
 
-        # 12. Account Reset
+        # 12. Account Reset (default is now Rs 1,00,000)
         reset_res = client.post('/api/account/reset', headers=headers)
         assert reset_res.status_code == 200
-        assert reset_res.json()['new_balance'] == 1000000.0
+        assert reset_res.json()['new_balance'] == 100000.0
+        assert reset_res.json()['starting_balance'] == 100000.0
 
         empty_holdings = client.get('/api/portfolio/holdings', headers=headers).json()
         assert len(empty_holdings) == 0
+
+        # 12b. Reset with a custom amount
+        custom = client.post('/api/account/reset', json={'amount': 250000}, headers=headers)
+        assert custom.status_code == 200
+        assert custom.json()['new_balance'] == 250000.0
+        summary_custom = client.get('/api/portfolio/summary', headers=headers).json()
+        assert summary_custom['cash_balance'] == 250000.0
+        assert summary_custom['starting_balance'] == 250000.0
+
+        # 12c. Invalid amounts are rejected
+        assert client.post('/api/account/reset', json={'amount': 0}, headers=headers).status_code == 400
+        assert client.post('/api/account/reset', json={'amount': -5}, headers=headers).status_code == 400

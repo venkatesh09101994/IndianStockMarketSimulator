@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 from app.api.deps import get_db, get_current_user
 from app.config import settings
@@ -59,7 +59,10 @@ def signup(user_in: UserSignup, response: Response, db: Session = Depends(get_db
     db.refresh(user)
 
     token = create_access_token({'sub': str(user.id), 'email': user.email})
-    response.set_cookie(key='access_token', value=token, httponly=True, samesite='lax')
+    response.set_cookie(
+        key='access_token', value=token, httponly=True,
+        samesite='lax', secure=settings.COOKIE_SECURE,
+    )
 
     return TokenResponse(
         access_token=token,
@@ -74,7 +77,10 @@ def login(login_in: UserLogin, response: Response, db: Session = Depends(get_db)
         raise HTTPException(status_code=401, detail='Incorrect email or password')
 
     token = create_access_token({'sub': str(user.id), 'email': user.email})
-    response.set_cookie(key='access_token', value=token, httponly=True, samesite='lax')
+    response.set_cookie(
+        key='access_token', value=token, httponly=True,
+        samesite='lax', secure=settings.COOKIE_SECURE,
+    )
 
     return TokenResponse(
         access_token=token,

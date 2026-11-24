@@ -31,6 +31,7 @@ interface StockAreaChartProps {
   dayChangePct: number;
   selectedRange: string;
   onRangeChange: (range: string) => void;
+  loading?: boolean;
 }
 
 export const StockAreaChart: React.FC<StockAreaChartProps> = ({
@@ -42,6 +43,7 @@ export const StockAreaChart: React.FC<StockAreaChartProps> = ({
   dayChangePct = 0,
   selectedRange = '1M',
   onRangeChange,
+  loading = false,
 }) => {
   const [chartMode, setChartMode] = useState<'area' | 'line'>('area');
   const timeframes = ['1D', '7D', '1M', '6M', '1Y', 'ALL'];
@@ -201,8 +203,20 @@ export const StockAreaChart: React.FC<StockAreaChartProps> = ({
       <div className="h-72 sm:h-80 w-full relative">
         {formattedData.length === 0 ? (
           <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 text-xs gap-2">
-            <div className="w-6 h-6 border-2 border-zinc-900 border-t-transparent rounded-full animate-spin" />
-            <span>Loading live market chart...</span>
+            {loading ? (
+              <>
+                <div className="w-6 h-6 border-2 border-zinc-900 border-t-transparent rounded-full animate-spin" />
+                <span>Loading market chart...</span>
+              </>
+            ) : (
+              <>
+                <span className="text-2xl">📉</span>
+                <span>No historical data available for this range.</span>
+                <span className="text-[10px] text-slate-400">
+                  Data appears once the market feed has been fetched.
+                </span>
+              </>
+            )}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">

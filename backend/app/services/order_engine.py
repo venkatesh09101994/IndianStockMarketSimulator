@@ -3,11 +3,22 @@ from sqlalchemy.orm import Session
 from app.models.order import Order
 from app.models.stock import LatestQuote
 from app.services.execution_service import execute_order
+from app.services.order_service import expire_pending_orders
 
 logger = logging.getLogger(__name__)
 
 
 def run_order_engine(db: Session):
+    # Expire stale DAY/GTT orders first so their blocked cash is available even
+    # if the dedicated 15:30 job did not run (app was closed, worker restarted).
+    try:
+        expired = expire_pending_orders(db)
+        if expired:
+            logger.info('Expired %d pending order(s)', expired)
+    except Exception as exc:
+        db.rollback()
+        logger.error('Failed to expire pending orders: %s', exc)
+
     order_ids = [row[0] for row in db.query(Order.id).filter(Order.status == 'PENDING').all()]
     if not order_ids:
         return
@@ -49,20 +60,24 @@ def run_order_engine(db: Session):
                 reason = 'MARKET_RETRY'
 
             elif order.order_type == 'LIMIT' and order.limit_price is not None:
+                # Fill at the current price when it is already better than the
+                # limit; otherwise fill at the limit itself. Using the session
+                # high/low here gave every resting order the best price of the
+                # whole day, which is not how a real book fills.
                 if order.side == 'BUY':
                     if cur_price <= order.limit_price:
                         matched = True
-                        fill_price = min(order.limit_price, cur_price)
+                        fill_price = cur_price
                     elif new_low is not None and new_low <= order.limit_price:
                         matched = True
-                        fill_price = min(order.limit_price, new_low)
+                        fill_price = order.limit_price
                 elif order.side == 'SELL':
                     if cur_price >= order.limit_price:
                         matched = True
-                        fill_price = max(order.limit_price, cur_price)
+                        fill_price = cur_price
                     elif new_high is not None and new_high >= order.limit_price:
                         matched = True
-                        fill_price = max(order.limit_price, new_high)
+                        fill_price = order.limit_price
 
             elif order.order_type == 'SL_M' and order.trigger_price is not None:
                 reason = 'SL_HIT'
@@ -72,14 +87,14 @@ def run_order_engine(db: Session):
                         fill_price = cur_price
                     elif new_low is not None and new_low <= order.trigger_price:
                         matched = True
-                        fill_price = new_low
+                        fill_price = order.trigger_price
                 elif order.side == 'BUY':
                     if cur_price >= order.trigger_price:
                         matched = True
                         fill_price = cur_price
                     elif new_high is not None and new_high >= order.trigger_price:
                         matched = True
-                        fill_price = new_high
+                        fill_price = order.trigger_price
 
             if not matched:
                 continue

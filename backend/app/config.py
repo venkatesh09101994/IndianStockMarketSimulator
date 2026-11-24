@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     REPLAY_SPEED_SECONDS: int = 2
     ALLOWED_ORIGINS: str = 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000'
 
+    # Desktop builds intentionally allow a shared local account without login.
+    # Set ALLOW_ANONYMOUS=false for any multi-user or network-exposed deployment.
+    ALLOW_ANONYMOUS: bool = True
+    # Enable when serving over HTTPS (production / reverse proxy).
+    COOKIE_SECURE: bool = False
+
     # LLM / AI Trader (OpenAI-compatible endpoint)
     LLM_BASE_URL: str = 'http://localhost:11434/v1'
     LLM_API_KEY: str = 'ollama'

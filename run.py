@@ -107,6 +107,7 @@ if __name__ == '__main__':
             width=1280,
             height=820,
             resizable=True,
+            maximized=True,
             min_size=(900, 600),
         )
         webview.start()

@@ -1,9 +1,10 @@
+import logging
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import or_, desc, asc, func
-from app.api.deps import get_db, get_optional_current_user
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_, func
+from app.api.deps import get_db, get_optional_current_user, get_current_user
 from app.models.user import User
 from app.models.stock import Stock, LatestQuote, PriceHistory
 from app.models.watchlist import WatchlistItem
@@ -11,11 +12,31 @@ from app.schemas.stock import (
     StockBrief, StockDetail, LatestQuoteOut, CandleOut, StockCompareOut,
     MarketStatusOut, TickerItem
 )
-from app.services.market_clock import is_market_open, is_replay_mode, get_ist_now, get_market_status_details
+from app.services.market_clock import (
+    IST, get_ist_now, get_market_status_details, is_market_open
+)
+from app.services.history_service import backfill_daily_history, backfill_intraday_history
 from app.services.stock_onboard import search_online, add_stock
-from app.providers import price_provider
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=['Stocks'])
+
+# On-demand backfill is a best-effort repair path. If the provider is down we
+# retry at most once every ten minutes per stock/interval instead of hammering
+# it on every chart request.
+_BACKFILL_COOLDOWN_SECONDS = 600
+_last_backfill_attempt: Dict[Tuple[int, str], datetime] = {}
+
+
+def _should_backfill(stock_id: int, interval: str) -> bool:
+    key = (stock_id, interval)
+    now = datetime.now(timezone.utc)
+    last = _last_backfill_attempt.get(key)
+    if last is not None and (now - last).total_seconds() < _BACKFILL_COOLDOWN_SECONDS:
+        return False
+    _last_backfill_attempt[key] = now
+    return True
 
 def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
     """SQLite returns naive datetimes; treat them as UTC so clients can parse them reliably."""
@@ -54,7 +75,7 @@ def get_stocks(
     db: Session = Depends(get_db),
     user: Optional[User] = Depends(get_optional_current_user)
 ):
-    query = db.query(Stock).filter(Stock.is_active == True)
+    query = db.query(Stock).options(joinedload(Stock.quote)).filter(Stock.is_active == True)
 
     if search:
         search_fmt = f'%{search}%'
@@ -129,7 +150,11 @@ def compare_stocks(symbols: str = Query('RELIANCE,TCS,INFY,HDFCBANK'), db: Sessi
 
 
 @router.get('/stocks/search/online')
-def search_stocks_online(q: str = Query(''), db: Session = Depends(get_db)):
+def search_stocks_online(
+    q: str = Query(''),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     results = search_online(q)
     # annotate already in DB
     existing = {s.yf_symbol for s in db.query(Stock.yf_symbol).all()}
@@ -138,7 +163,11 @@ def search_stocks_online(q: str = Query(''), db: Session = Depends(get_db)):
     return results
 
 @router.post('/stocks/add')
-def add_stock_endpoint(payload: dict, db: Session = Depends(get_db)):
+def add_stock_endpoint(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     symbol_input = (payload or {}).get('symbol', '').strip()
     if not symbol_input:
         raise HTTPException(status_code=400, detail='symbol required')
@@ -184,6 +213,127 @@ def get_stock_detail(
         in_watchlist=in_watch
     )
 
+def _candle_out(c: PriceHistory) -> CandleOut:
+    return CandleOut(
+        ts=_as_utc(c.ts),
+        open=round(c.open / 100.0, 2),
+        high=round(c.high / 100.0, 2),
+        low=round(c.low / 100.0, 2),
+        close=round(c.close / 100.0, 2),
+        volume=c.volume,
+    )
+
+
+def _load_daily_candles(db: Session, stock: Stock) -> List[PriceHistory]:
+    return db.query(PriceHistory).filter(
+        PriceHistory.stock_id == stock.id,
+        PriceHistory.interval == '1d',
+    ).order_by(PriceHistory.ts.asc()).all()
+
+
+def _load_intraday_candles(db: Session, stock: Stock) -> List[PriceHistory]:
+    return db.query(PriceHistory).filter(
+        PriceHistory.stock_id == stock.id,
+        PriceHistory.interval == '1m',
+    ).order_by(PriceHistory.ts.asc()).all()
+
+
+def _looks_synthetic(candles: List[PriceHistory]) -> bool:
+    """Seeded demo candles include weekend dates; real NSE daily candles never do."""
+    return any(_as_utc(c.ts).astimezone(IST).weekday() >= 5 for c in candles)
+
+
+def _intraday_history(db: Session, stock: Stock) -> List[CandleOut]:
+    candles = _load_intraday_candles(db, stock)
+
+    # During a live session the newest stored minute bar goes stale quickly, so
+    # refresh it (rate-limited by the backfill cooldown). When the market is
+    # closed we keep the last session unless there is no data at all.
+    stale = not candles
+    if candles:
+        latest_ts = max(_as_utc(c.ts) for c in candles)
+        stale = is_market_open(db) and (
+            datetime.now(timezone.utc) - latest_ts
+        ) > timedelta(minutes=5)
+
+    if stale and _should_backfill(stock.id, '1m'):
+        try:
+            backfill_intraday_history(db, stock)
+        except Exception as exc:
+            db.rollback()
+            logger.warning('Intraday backfill failed for %s: %s', stock.symbol, exc)
+        candles = _load_intraday_candles(db, stock)
+
+    if not candles:
+        return []
+
+    latest_day = max(_as_utc(c.ts).astimezone(IST).date() for c in candles)
+    todays = [
+        c for c in candles
+        if _as_utc(c.ts).astimezone(IST).date() == latest_day
+    ]
+    return [_candle_out(c) for c in todays]
+
+
+_DAILY_LOOKBACK_DAYS = {
+    '7D': 7,
+    '1W': 7,
+    '1M': 30,
+    '3M': 90,
+    '6M': 182,
+    '1Y': 365,
+    '5Y': 1825,
+}
+
+# Minimum number of stored candles before we trust the series for a timeframe.
+_MIN_CANDLES = {
+    '7D': 5,
+    '1W': 5,
+    '1M': 20,
+    '3M': 55,
+    '6M': 100,
+    '1Y': 180,
+    'YTD': 20,
+    '5Y': 180,
+    'ALL': 180,
+}
+
+
+def _daily_history(db: Session, stock: Stock, timeframe: str) -> List[CandleOut]:
+    tf = (timeframe or '1M').upper()
+    candles = _load_daily_candles(db, stock)
+
+    needs_repair = _looks_synthetic(candles) or len(candles) < _MIN_CANDLES.get(tf, 20)
+    if needs_repair and _should_backfill(stock.id, '1d'):
+        period = '5y' if tf in ('5Y', 'ALL') else '2y'
+        try:
+            backfill_daily_history(db, stock, period=period, replace=True)
+        except Exception as exc:
+            db.rollback()
+            logger.warning('Daily backfill failed for %s: %s', stock.symbol, exc)
+        candles = _load_daily_candles(db, stock)
+
+    if not candles:
+        return []
+
+    now_ist = get_ist_now()
+    if tf == 'YTD':
+        cutoff = datetime(now_ist.year, 1, 1, tzinfo=IST)
+    elif tf in _DAILY_LOOKBACK_DAYS:
+        cutoff = now_ist - timedelta(days=_DAILY_LOOKBACK_DAYS[tf])
+    else:
+        cutoff = None
+
+    if cutoff is not None:
+        candles = [c for c in candles if _as_utc(c.ts) >= cutoff]
+
+    # Keep payloads sane for ALL/5Y while still showing real history.
+    if tf in ('5Y', 'ALL') and len(candles) > 1500:
+        candles = candles[-1500:]
+
+    return [_candle_out(c) for c in candles]
+
+
 @router.get('/stocks/{symbol}/history', response_model=List[CandleOut])
 def get_stock_history(
     symbol: str,
@@ -191,92 +341,24 @@ def get_stock_history(
     timeframe: str = Query('1M', alias='range'),
     db: Session = Depends(get_db)
 ):
-    import math
+    """Return real stored candles only.
+
+    There is intentionally no synthetic fallback: a missing series returns an
+    empty list so the UI can show an honest empty state.
+    """
     s = db.query(Stock).filter(Stock.symbol == symbol.upper()).first()
     if not s:
         raise HTTPException(status_code=404, detail='Stock not found')
 
-    candles_db = db.query(PriceHistory).filter(
-        PriceHistory.stock_id == s.id,
-        PriceHistory.interval == '1d'
-    ).order_by(PriceHistory.ts.asc()).all()
-
-    now = datetime.now(timezone.utc)
-    base_p = (s.quote.price / 100.0) if s.quote else 2500.0
-    open_p = (s.quote.open / 100.0) if (s.quote and s.quote.open) else base_p * 0.995
-
-    # 1. 1D Intraday view
-    if timeframe.upper() == '1D':
-        pts = 25
-        res = []
-        for i in range(pts):
-            t_frac = i / float(pts - 1)
-            wave = math.sin(t_frac * math.pi * 3.5) * (base_p * 0.008) + math.cos(t_frac * math.pi * 2.0) * (base_p * 0.004)
-            c_price = round(open_p + (base_p - open_p) * t_frac + wave, 2)
-            c_high = round(c_price + abs(wave * 0.5) + (base_p * 0.002), 2)
-            c_low = round(c_price - abs(wave * 0.5) - (base_p * 0.002), 2)
-            c_open = round(c_price - (wave * 0.3), 2)
-            c_ts = now - timedelta(minutes=(pts - 1 - i) * 15)
-            res.append(CandleOut(
-                ts=c_ts,
-                open=c_open,
-                high=max(c_high, c_open, c_price),
-                low=min(c_low, c_open, c_price),
-                close=c_price,
-                volume=int(45000 + abs(math.sin(i)) * 60000)
-            ))
-        return res
-
-    # 2. 7D view: return last 7 daily candles
-    if timeframe.upper() in ['7D', '1W'] and candles_db and len(candles_db) >= 7:
-        selected = candles_db[-7:]
-        return [
-            CandleOut(
-                ts=_as_utc(c.ts),
-                open=round(c.open / 100.0, 2),
-                high=round(c.high / 100.0, 2),
-                low=round(c.low / 100.0, 2),
-                close=round(c.close / 100.0, 2),
-                volume=c.volume
-            )
-            for c in selected
-        ]
-
-    # 3. 1M view: return real DB candles
-    if timeframe.upper() == '1M' and candles_db and len(candles_db) >= 10:
-        return [
-            CandleOut(
-                ts=_as_utc(c.ts),
-                open=round(c.open / 100.0, 2),
-                high=round(c.high / 100.0, 2),
-                low=round(c.low / 100.0, 2),
-                close=round(c.close / 100.0, 2),
-                volume=c.volume
-            )
-            for c in candles_db[-30:]
-        ]
-
-    # 4. Multi-month / 6M / YTD / 1Y / 5Y / ALL view
-    pts = 60 if timeframe.upper() == '6M' else (52 if timeframe.upper() in ['1Y', 'YTD'] else 70)
-    delta = timedelta(days=3) if timeframe.upper() == '6M' else timedelta(weeks=1)
-    generated = []
-    for i in range(pts, -1, -1):
-        c_time = now - (delta * i)
-        progress = (pts - i) / float(pts)
-        wave = math.sin(progress * math.pi * 4.0) * (base_p * 0.05) + math.cos(progress * math.pi * 2.5) * (base_p * 0.03)
-        c_val = round(base_p * (0.86 + progress * 0.14) + wave, 2)
-        generated.append(CandleOut(
-            ts=c_time,
-            open=round(c_val * 0.995, 2),
-            high=round(c_val * 1.015, 2),
-            low=round(c_val * 0.985, 2),
-            close=c_val,
-            volume=int(1200000 + abs(math.cos(i)) * 400000)
-        ))
-    return generated
+    if interval == '1m' or (timeframe or '').upper() == '1D':
+        return _intraday_history(db, s)
+    return _daily_history(db, s, timeframe)
 
 @router.post('/market/refresh')
-def refresh_market_data(db: Session = Depends(get_db)):
+def refresh_market_data(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Force a quote refresh, e.g. when the desktop window is reopened."""
     from app.jobs.scheduler import job_refresh_quotes
     job_refresh_quotes(db)
@@ -312,7 +394,13 @@ def get_market_status(db: Session = Depends(get_db)):
 
 @router.get('/market/ticker', response_model=List[TickerItem])
 def get_market_ticker(db: Session = Depends(get_db)):
-    stocks = db.query(Stock).filter(Stock.is_active == True).limit(12).all()
+    stocks = (
+        db.query(Stock)
+        .options(joinedload(Stock.quote))
+        .filter(Stock.is_active == True)
+        .limit(12)
+        .all()
+    )
     items = []
     for s in stocks:
         q = s.quote

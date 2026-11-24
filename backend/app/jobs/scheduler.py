@@ -5,16 +5,27 @@ from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from app.db import SessionLocal
 from app.config import settings
-from app.models.stock import Stock, LatestQuote, PriceHistory
+from app.models.stock import Stock, LatestQuote
 from app.providers import get_active_provider
 from app.services.market_clock import is_market_open, is_replay_mode, get_ist_now, IST
 from app.services.order_engine import run_order_engine
+from app.services.order_service import expire_pending_orders
 from app.services.square_off import square_off_mis_positions
 from app.services.snapshot_service import take_daily_snapshots
 from app.services.ai_auto_trader import run_auto_trader
+from app.services.history_service import (
+    refresh_daily_history, refresh_company_info, purge_old_minute_candles
+)
 
 logger = logging.getLogger(__name__)
-scheduler = BackgroundScheduler(timezone='Asia/Kolkata')
+scheduler = BackgroundScheduler(
+    timezone='Asia/Kolkata',
+    job_defaults={
+        'max_instances': 1,
+        'coalesce': True,
+        'misfire_grace_time': 300,
+    },
+)
 
 
 def _is_same_ist_day(dt, now_ist) -> bool:
@@ -121,6 +132,50 @@ def job_ai_auto_trader():
     finally:
         db.close()
 
+def job_expire_day_orders():
+    db = SessionLocal()
+    try:
+        count = expire_pending_orders(db)
+        if count:
+            logger.info('Expired %d pending order(s) at market close', count)
+    except Exception as e:
+        db.rollback()
+        logger.error(f'Error in job_expire_day_orders: {e}')
+    finally:
+        db.close()
+
+def job_refresh_daily_history():
+    db = SessionLocal()
+    try:
+        # Incremental upsert: one year keeps recent candles and the trailing
+        # return windows correct without re-downloading five years per stock.
+        refresh_daily_history(db, period='1y')
+    except Exception as e:
+        db.rollback()
+        logger.error(f'Error in job_refresh_daily_history: {e}')
+    finally:
+        db.close()
+
+def job_refresh_company_info():
+    db = SessionLocal()
+    try:
+        refresh_company_info(db)
+    except Exception as e:
+        db.rollback()
+        logger.error(f'Error in job_refresh_company_info: {e}')
+    finally:
+        db.close()
+
+def job_purge_minute_candles():
+    db = SessionLocal()
+    try:
+        purge_old_minute_candles(db)
+    except Exception as e:
+        db.rollback()
+        logger.error(f'Error in job_purge_minute_candles: {e}')
+    finally:
+        db.close()
+
 def start_scheduler():
     # 1. Refresh quotes every PRICE_REFRESH_SECONDS
     scheduler.add_job(
@@ -159,6 +214,38 @@ def start_scheduler():
         job_ai_auto_trader,
         trigger=IntervalTrigger(minutes=5),
         id='ai_auto_trader',
+        replace_existing=True
+    )
+
+    # 6. Expire DAY/GTT orders at 15:30 IST and release their blocked cash
+    scheduler.add_job(
+        job_expire_day_orders,
+        trigger=CronTrigger(day_of_week='mon-fri', hour=15, minute=30),
+        id='expire_day_orders',
+        replace_existing=True
+    )
+
+    # 7. Refresh real daily candles + derived metrics after the session
+    scheduler.add_job(
+        job_refresh_daily_history,
+        trigger=CronTrigger(day_of_week='mon-fri', hour=16, minute=0),
+        id='refresh_daily_history',
+        replace_existing=True
+    )
+
+    # 8. Refresh company metadata once a day
+    scheduler.add_job(
+        job_refresh_company_info,
+        trigger=CronTrigger(day_of_week='mon-fri', hour=16, minute=30),
+        id='refresh_company_info',
+        replace_existing=True
+    )
+
+    # 9. Keep minute candles to a short retention window
+    scheduler.add_job(
+        job_purge_minute_candles,
+        trigger=CronTrigger(hour=2, minute=0),
+        id='purge_minute_candles',
         replace_existing=True
     )
 

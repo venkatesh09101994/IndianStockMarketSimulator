@@ -65,6 +65,7 @@ export const StockDetail: React.FC = () => {
 
   const [stock, setStock] = useState<StockData | null>(null);
   const [candles, setCandles] = useState<CandleData[]>([]);
+  const [historyLoading, setHistoryLoading] = useState<boolean>(false);
   const [selectedRange, setSelectedRange] = useState<string>('1M');
   const [comparisonStocks, setComparisonStocks] = useState<ComparisonStock[]>([]);
   const [inWatchlist, setInWatchlist] = useState<boolean>(false);
@@ -127,12 +128,15 @@ export const StockDetail: React.FC = () => {
     const requested = (symbol || 'RELIANCE').toUpperCase();
 
     const loadHistory = async () => {
+      if (!cancelled) setHistoryLoading(true);
       try {
         const res = await api.get(`/stocks/${requested}/history?range=${selectedRange}`);
         if (cancelled || !res.data || !Array.isArray(res.data)) return;
         setCandles(res.data);
       } catch (e) {
         if (!cancelled) console.error('Failed to load candles:', e);
+      } finally {
+        if (!cancelled) setHistoryLoading(false);
       }
     };
 
@@ -357,6 +361,7 @@ export const StockDetail: React.FC = () => {
             dayChangePct={dayChangePct}
             selectedRange={selectedRange}
             onRangeChange={setSelectedRange}
+            loading={historyLoading}
           />
 
           {/* Pure Indian Stock Comparison Grid */}

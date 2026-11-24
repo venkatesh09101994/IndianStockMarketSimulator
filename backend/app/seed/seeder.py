@@ -2,12 +2,11 @@ import os
 import csv
 import logging
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
-from app.models.stock import Stock, LatestQuote, PriceHistory
+from app.models.stock import Stock, LatestQuote
 from app.models.holiday import MarketHoliday
 from app.models.app_state import AppState
-from app.providers import price_provider
 
 logger = logging.getLogger(__name__)
 
@@ -168,29 +167,11 @@ def seed_database(db: Session):
                 updated_at=datetime.now(timezone.utc)
             )
             db.add(q)
-            
-            # Add sample 1d candles for chart if none exist
-            count_h = db.query(PriceHistory).filter(PriceHistory.stock_id == s.id).count()
-            if count_h == 0:
-                now = datetime.now(timezone.utc)
-                for day_i in range(30, -1, -1):
-                    c_date = now - timedelta(days=day_i)
-                    drift = (30 - day_i) * 0.002
-                    sim_c = int(base_p * (0.95 + drift))
-                    sim_o = int(sim_c * 0.995)
-                    sim_h = int(sim_c * 1.01)
-                    sim_l = int(sim_c * 0.99)
-                    ph = PriceHistory(
-                        stock_id=s.id,
-                        interval="1d",
-                        ts=c_date,
-                        open=sim_o,
-                        high=sim_h,
-                        low=sim_l,
-                        close=sim_c,
-                        volume=1200000 + (day_i * 25000)
-                    )
-                    db.add(ph)
+
+            # History is intentionally NOT seeded here. Real daily/minute
+            # candles are fetched from the provider by history_service (on
+            # first chart request and by the daily refresh job). Fabricating
+            # candles made charts and backtests disagree with actual prices.
 
     # 3. Seed market holidays
     holidays = [

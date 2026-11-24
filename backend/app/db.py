@@ -34,6 +34,15 @@ if db_url.startswith('sqlite'):
     def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute('PRAGMA foreign_keys=ON;')
+        # The API and the background scheduler write concurrently. WAL plus a
+        # busy timeout prevents "database is locked" failures under that load.
+        try:
+            cursor.execute('PRAGMA journal_mode=WAL;')
+        except Exception:
+            # In-memory databases do not support WAL; keep the default mode.
+            pass
+        cursor.execute('PRAGMA busy_timeout=5000;')
+        cursor.execute('PRAGMA synchronous=NORMAL;')
         cursor.close()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

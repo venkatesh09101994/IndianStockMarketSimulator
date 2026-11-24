@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.config import settings
@@ -6,12 +6,30 @@ from app.models.account import Account
 from app.models.stock import Stock
 from app.models.order import Order
 from app.models.holding import Holding
-from app.models.position import Position
 from app.models.wallet import WalletTransaction
 from app.schemas.order import OrderCreate
-from app.services.market_clock import is_market_open, is_mis_allowed, is_replay_mode
+from app.services.market_clock import (
+    is_market_open, is_mis_allowed, get_ist_now
+)
 from app.services.execution_service import execute_order
 from app.services.charges import compute_charges
+
+
+def _next_market_close_utc() -> datetime:
+    """UTC-naive timestamp of the next 15:30 IST close (weekdays only)."""
+    now_ist = get_ist_now()
+    close_ist = now_ist.replace(hour=15, minute=30, second=0, microsecond=0)
+    if now_ist >= close_ist:
+        close_ist += timedelta(days=1)
+    while close_ist.weekday() >= 5:
+        close_ist += timedelta(days=1)
+    return close_ist.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _expiry_for(validity: str) -> datetime:
+    if (validity or 'DAY').upper() == 'GTT':
+        return (datetime.now(timezone.utc) + timedelta(days=365)).replace(tzinfo=None)
+    return _next_market_close_utc()
 
 def place_order(db: Session, user_id: int, order_in: OrderCreate) -> Order:
     stock = db.query(Stock).filter(Stock.symbol == order_in.symbol, Stock.is_active == True).first()
@@ -29,7 +47,14 @@ def place_order(db: Session, user_id: int, order_in: OrderCreate) -> Order:
         raise ValueError('Account not found')
 
     quote = stock.quote
-    current_price = quote.price if quote else 250000
+    # Never invent a price. Executing against a fake fallback silently corrupts
+    # cash balances and P&L, so refuse the order until a real quote exists.
+    if not quote or not quote.price or quote.price <= 0:
+        raise ValueError(
+            f'No live quote available for {stock.symbol}. Wait for the next '
+            'market-data refresh and try again.'
+        )
+    current_price = quote.price
 
     limit_paise = int(round(order_in.limit_price * 100)) if order_in.limit_price else None
     trigger_paise = int(round(order_in.trigger_price * 100)) if order_in.trigger_price else None
@@ -107,11 +132,12 @@ def place_order(db: Session, user_id: int, order_in: OrderCreate) -> Order:
         limit_price=limit_paise,
         trigger_price=trigger_paise,
         placed_price=current_price,
-        placed_day_high=quote.day_high if quote else current_price,
-        placed_day_low=quote.day_low if quote else current_price,
+        placed_day_high=quote.day_high or current_price,
+        placed_day_low=quote.day_low or current_price,
         validity=order_in.validity,
         status='PENDING',
         blocked_amount=blocked_amount,
+        expires_at=_expiry_for(order_in.validity),
         created_at=datetime.now(timezone.utc)
     )
     db.add(order)
@@ -172,3 +198,42 @@ def cancel_order(db: Session, user_id: int, order_id: int) -> Order:
     db.commit()
     db.refresh(order)
     return order
+
+
+def expire_pending_orders(db: Session, now: datetime | None = None) -> int:
+    """Expire DAY/GTT orders whose deadline has passed and release their cash.
+
+    Called by the 15:30 IST scheduler job and again by the order engine so a
+    missed job cannot leave blocked funds locked indefinitely.
+    """
+    now_utc = (now or datetime.now(timezone.utc))
+    if now_utc.tzinfo is not None:
+        now_utc = now_utc.astimezone(timezone.utc).replace(tzinfo=None)
+
+    pending = db.query(Order).filter(
+        Order.status == 'PENDING',
+        Order.expires_at.isnot(None),
+        Order.expires_at <= now_utc,
+    ).all()
+    if not pending:
+        return 0
+
+    for order in pending:
+        if order.blocked_amount and order.blocked_amount > 0:
+            account = db.query(Account).filter(Account.user_id == order.user_id).first()
+            if account:
+                account.cash_balance += order.blocked_amount
+                db.add(WalletTransaction(
+                    user_id=order.user_id,
+                    type='ORDER_RELEASE',
+                    amount=order.blocked_amount,
+                    balance_after=account.cash_balance,
+                    ref_order_id=order.id,
+                    note=f'Released blocked funds on expiry of order #{order.id}'
+                ))
+            order.blocked_amount = 0
+        order.status = 'EXPIRED'
+        order.reject_reason = 'Order expired at market close'
+
+    db.commit()
+    return len(pending)

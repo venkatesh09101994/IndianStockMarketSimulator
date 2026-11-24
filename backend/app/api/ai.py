@@ -8,7 +8,6 @@ from app.services.multi_agent import debate as multi_debate
 from app.services.ai_config import get_llm_config, set_llm_config, get_ai_config, set_ai_config
 from app.utils.time import to_utc
 import requests
-import os
 
 router = APIRouter(prefix='/ai', tags=['AI Trader'])
 
@@ -70,13 +69,17 @@ def update_config(payload: dict, db: Session = Depends(get_db), current_user: Us
 @router.post('/test-connection')
 def test_connection(payload: dict = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     payload = payload or {}
+    stored = get_llm_config(db, reveal=True)
     if 'base_url' in payload:
-        base_url = payload['base_url']
-        api_key = payload.get('api_key', '')
-        model = payload.get('model', '')
+        base_url = payload.get('base_url') or stored['base_url']
+        api_key = payload.get('api_key') or ''
+        model = payload.get('model') or stored['model']
     else:
-        c = get_llm_config(db)
-        base_url, api_key, model = c['base_url'], c['api_key'], c['model']
+        base_url, api_key, model = stored['base_url'], stored['api_key'], stored['model']
+    # The browser only ever receives a masked key; fall back to the stored one
+    # when the user tests the connection without re-entering it.
+    if not api_key or '•' in api_key:
+        api_key = stored['api_key']
     try:
         r = requests.get(f"{base_url.rstrip('/')}/models", headers={'Authorization': f'Bearer {api_key}'}, timeout=8)
         ok = r.status_code < 400
@@ -142,7 +145,7 @@ def accuracy(db: Session = Depends(get_db), current_user: User = Depends(get_cur
 
 @router.get('/status')
 def status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    c = get_llm_config(db)
+    c = get_llm_config(db, reveal=True)
     base_url, api_key, model = c['base_url'], c['api_key'], c['model']
     try:
         r = requests.get(f"{base_url.rstrip('/')}/models", headers={'Authorization': f'Bearer {api_key}'}, timeout=5)

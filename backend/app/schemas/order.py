@@ -29,6 +29,7 @@ class OrderOut(BaseModel):
     blocked_amount: float
     created_at: datetime
     executed_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
     execution_price: Optional[float] = None
     realized_pnl: Optional[float] = None
 

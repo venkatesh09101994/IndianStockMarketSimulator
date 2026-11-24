@@ -1,12 +1,15 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, RotateCcw, Play, CheckCircle2, AlertTriangle, ShieldCheck, Cpu, Bot } from 'lucide-react';
+import { RotateCcw, CheckCircle2, Cpu, Bot } from 'lucide-react';
 import api from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 
 export const Settings: React.FC = () => {
-  const { user, updateUserBalance } = useAuthStore();
+  const { updateUserBalance } = useAuthStore();
   const [replayEnabled, setReplayEnabled] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
+  const [resetAmount, setResetAmount] = useState('100000');
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   // LLM config
@@ -120,13 +123,27 @@ export const Settings: React.FC = () => {
   };
 
   const handleResetAccount = async () => {
+    const amount = Number(resetAmount);
+    if (!Number.isFinite(amount) || amount < 1) {
+      setResetError('Enter a valid amount of at least ₹1.');
+      return;
+    }
+    setResetError(null);
+    setResetLoading(true);
     try {
-      const res = await api.post('/account/reset');
-      updateUserBalance(res.data.new_balance);
+      const res = await api.post('/account/reset', { amount });
+      const newBalance = Number(res.data.new_balance);
+      updateUserBalance(newBalance, res.data.starting_balance ?? newBalance);
       setResetConfirm(false);
-      setMsg('Account reset complete! Starting balance restored to ₹10,00,000.');
-    } catch (e) {
-      console.error(e);
+      setMsg(
+        `Account reset complete! Virtual capital set to ₹${newBalance.toLocaleString('en-IN')}.`
+      );
+    } catch (e: any) {
+      setResetError(
+        'Reset failed: ' + (e?.response?.data?.detail || e?.message || 'unknown error')
+      );
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -174,38 +191,77 @@ export const Settings: React.FC = () => {
       </div>
 
       {/* Account Reset */}
-      <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm flex items-center justify-between gap-6">
-        <div>
-          <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-            <RotateCcw className="w-4 h-4 text-rose-500" /> Reset Virtual Account
-          </h3>
-          <p className="text-xs text-slate-400 mt-1 max-w-md">
-            Resets your portfolio, holdings, positions, and trades back to zero, and replenishes your wallet with ₹10,00,000 virtual cash.
-          </p>
-        </div>
-
-        {resetConfirm ? (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleResetAccount}
-              className="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold shadow-md hover:bg-rose-700"
-            >
-              Confirm Reset
-            </button>
-            <button
-              onClick={() => setResetConfirm(false)}
-              className="px-3 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-semibold"
-            >
-              Cancel
-            </button>
+      <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+              <RotateCcw className="w-4 h-4 text-rose-500" /> Reset Virtual Account
+            </h3>
+            <p className="text-xs text-slate-400 mt-1 max-w-md">
+              Resets your portfolio, holdings, positions, and trades back to zero, then funds your wallet with the amount you choose (default ₹1,00,000).
+            </p>
           </div>
-        ) : (
-          <button
-            onClick={() => setResetConfirm(true)}
-            className="px-5 py-2.5 rounded-2xl border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-bold transition-all"
-          >
-            Reset Funds
-          </button>
+
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 shrink-0">
+            <label
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold transition-colors ${
+                resetConfirm
+                  ? 'border-rose-300 bg-white text-slate-900'
+                  : 'border-slate-200 bg-slate-50 text-slate-500'
+              }`}
+            >
+              <span className="text-slate-400">₹</span>
+              <input
+                type="number"
+                min={1}
+                step={1000}
+                inputMode="numeric"
+                aria-label="Reset amount in rupees"
+                value={resetAmount}
+                onChange={(e) => {
+                  setResetAmount(e.target.value);
+                  setResetError(null);
+                }}
+                disabled={!resetConfirm || resetLoading}
+                className="w-28 bg-transparent outline-none disabled:text-slate-400"
+              />
+            </label>
+
+            {resetConfirm ? (
+              <>
+                <button
+                  onClick={handleResetAccount}
+                  disabled={resetLoading}
+                  className="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-bold shadow-md hover:bg-rose-700 disabled:opacity-60"
+                >
+                  {resetLoading ? 'Applying...' : 'Apply'}
+                </button>
+                <button
+                  onClick={() => {
+                    setResetConfirm(false);
+                    setResetError(null);
+                  }}
+                  disabled={resetLoading}
+                  className="px-3 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-semibold disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => {
+                  setResetConfirm(true);
+                  setResetError(null);
+                }}
+                className="px-5 py-2.5 rounded-2xl border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-bold transition-all"
+              >
+                Reset Funds
+              </button>
+            )}
+          </div>
+        </div>
+        {resetError && (
+          <p className="text-[11px] font-semibold text-rose-600 mt-3">{resetError}</p>
         )}
       </div>
 
@@ -218,9 +274,12 @@ export const Settings: React.FC = () => {
         <p className="text-xs text-slate-400">Point to any OpenAI-compatible endpoint (Ollama, LM Studio, etc.). Stored locally.</p>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <input className="px-3 py-2 rounded-xl border border-slate-200 text-xs" placeholder="Base URL" value={llmBase} onChange={e => setLlmBase(e.target.value)} />
-          <input className="px-3 py-2 rounded-xl border border-slate-200 text-xs" placeholder="API Key" value={llmKey} onChange={e => setLlmKey(e.target.value)} />
+          <input className="px-3 py-2 rounded-xl border border-slate-200 text-xs" placeholder="API Key" value={llmKey} autoComplete="off" onChange={e => setLlmKey(e.target.value)} />
           <input className="px-3 py-2 rounded-xl border border-slate-200 text-xs" placeholder="Model" value={llmModel} onChange={e => setLlmModel(e.target.value)} />
         </div>
+        <p className="text-[10px] text-slate-400">
+          Saved API keys are masked. Leave the field unchanged to keep the current key.
+        </p>
         <div className="flex items-center gap-2">
           <button onClick={handleSaveLlm} disabled={llmSaving} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 disabled:opacity-50">
             {llmSaving ? 'Saving...' : 'Save LLM Settings'}

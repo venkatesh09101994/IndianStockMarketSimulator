@@ -30,24 +30,43 @@ def _set(db: Session, key: str, value: str):
         db.add(AppState(key=key, value=value))
 
 
-def get_llm_config(db: Session) -> Dict[str, str]:
+def _mask_secret(value: str) -> str:
+    if not value:
+        return ''
+    if len(value) <= 8:
+        return '•' * 8
+    return value[:3] + '•' * 6 + value[-4:]
+
+
+def get_llm_config(db: Session, reveal: bool = False) -> Dict[str, Any]:
+    """Return LLM settings.
+
+    By default the API key is masked because this dict is serialised to the
+    browser. Internal callers (the LLM client) must pass ``reveal=True``.
+    """
     from app.config import settings
+    api_key = _get(db, 'llm_api_key', settings.LLM_API_KEY)
     return {
         'base_url': _get(db, 'llm_base_url', settings.LLM_BASE_URL),
-        'api_key': _get(db, 'llm_api_key', settings.LLM_API_KEY),
+        'api_key': api_key if reveal else _mask_secret(api_key),
+        'api_key_set': bool(api_key),
         'model': _get(db, 'llm_model', settings.LLM_MODEL),
     }
 
 
 def set_llm_config(db: Session, base_url: str, api_key: str, model: str):
-    _set(db, 'llm_base_url', base_url)
-    _set(db, 'llm_api_key', api_key)
-    _set(db, 'llm_model', model)
+    # The UI receives a masked key. Never overwrite the stored secret with the
+    # mask or with an empty value.
+    if base_url:
+        _set(db, 'llm_base_url', base_url)
+    if api_key and '•' not in api_key:
+        _set(db, 'llm_api_key', api_key)
+    if model:
+        _set(db, 'llm_model', model)
     db.commit()
 
 
 def get_ai_config(db: Session) -> Dict[str, Any]:
-    from app.config import settings
     watchlist = _get(db, 'ai_watchlist', '')
     return {
         'enabled': _get(db, 'ai_enabled', 'false').lower() == 'true',

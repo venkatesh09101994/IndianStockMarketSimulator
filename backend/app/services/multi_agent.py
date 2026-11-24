@@ -6,7 +6,7 @@ from typing import Dict, Any
 from sqlalchemy.orm import Session
 from app.models.user import User
 from app.models.ai_decision import AIDecision
-from app.services.ai_trader import _get_quote_and_history, _build_prompt
+from app.services.ai_trader import _get_quote_and_history
 from app.services.ai_config import get_llm_config
 from app.services.agentmemory import recall, is_available as mem_available
 from app.services.stock_graph import load_graph, build_graph, neighbors, sector_peers
@@ -67,7 +67,8 @@ def debate(db: Session, user: User, symbol: str) -> Dict[str, Any]:
     holdings_qty = h.quantity if h else 0
     cash = user.account.cash_balance / 100.0 if user.account else 0.0
 
-    base_url, api_key, model = get_llm_config(db)['base_url'], get_llm_config(db)['api_key'], get_llm_config(db)['model']
+    c = get_llm_config(db, reveal=True)
+    base_url, api_key, model = c['base_url'], c['api_key'], c['model']
 
     # Bullish agent
     bull_prompt = (
