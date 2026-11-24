@@ -77,15 +77,15 @@ export const KnowledgeGraph: React.FC = () => {
         try {
           const res = await api.get('/graph/full');
           g = res.data;
-        } catch (e) {
-          const res = await api.post('/graph/build');
-          const res2 = await api.get('/graph/full');
-          g = res2.data;
+        } catch {
+          await api.post('/graph/build');
+          const res = await api.get('/graph/full');
+          g = res.data;
         }
         if (!g.nodes) {
-          const res = await api.post('/graph/build');
-          const res2 = await api.get('/graph/full');
-          g = res2.data;
+          await api.post('/graph/build');
+          const res = await api.get('/graph/full');
+          g = res.data;
         }
         setGraph(g);
         KG_CACHE.graph = g;

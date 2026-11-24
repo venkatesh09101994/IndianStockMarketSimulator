@@ -6,15 +6,12 @@ import {
   BookmarkCheck,
   ArrowUpRight,
   ArrowDownRight,
-  TrendingUp,
-  ShieldAlert,
   Clock,
 } from 'lucide-react';
 import api from '../api/client';
 import { StockAreaChart, CandleData } from '../components/charts/StockAreaChart';
 import { OrderModal } from '../components/trading/OrderModal';
 import { CompanyLogo } from '../components/common/CompanyLogo';
-import { useAuthStore } from '../store/useAuthStore';
 import { formatISTDateTime, formatISTTime, timeAgo } from '../utils/datetime';
 
 interface QuoteData {
@@ -61,7 +58,6 @@ interface ComparisonStock {
 export const StockDetail: React.FC = () => {
   const { symbol = 'RELIANCE' } = useParams<{ symbol: string }>();
   const navigate = useNavigate();
-  const { user } = useAuthStore();
 
   const [stock, setStock] = useState<StockData | null>(null);
   const [candles, setCandles] = useState<CandleData[]>([]);
@@ -69,7 +65,6 @@ export const StockDetail: React.FC = () => {
   const [selectedRange, setSelectedRange] = useState<string>('1M');
   const [comparisonStocks, setComparisonStocks] = useState<ComparisonStock[]>([]);
   const [inWatchlist, setInWatchlist] = useState<boolean>(false);
-  const [loading, setLoading] = useState<boolean>(true);
   const [orderModalOpen, setOrderModalOpen] = useState<boolean>(false);
   const [orderSide, setOrderSide] = useState<'BUY' | 'SELL'>('BUY');
 
@@ -85,7 +80,6 @@ export const StockDetail: React.FC = () => {
     setStock(null);
     setCandles([]);
     setInWatchlist(false);
-    setLoading(true);
 
     const loadStock = async () => {
       try {
@@ -97,8 +91,6 @@ export const StockDetail: React.FC = () => {
         }
       } catch (e) {
         if (!cancelled) console.error('Failed to load stock details:', e);
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     };
 

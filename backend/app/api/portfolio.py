@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -152,8 +152,8 @@ def benchmark(range: str = '1M', db: Session = Depends(get_db), current_user: Us
     # align to portfolio dates if available, else use benchmark dates
     if port_dates:
         align_dates = port_dates
-        bench_vals = [round(bench_map.get(d, (bench_vals[-1] if 'bench_vals' in locals() and bench_vals else 0)), 2) for d in align_dates]
-        # forward fill
+        # Forward-fill the benchmark onto the portfolio dates. Missing days
+        # (weekends/holidays) carry the previous close forward.
         last = None
         filled = []
         for d in align_dates:

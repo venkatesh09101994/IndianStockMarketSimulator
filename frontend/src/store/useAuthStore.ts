@@ -70,7 +70,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   logout: async () => {
     try {
       await api.post('/auth/logout');
-    } catch (e) {
+    } catch {
       // ignore
     }
     get().setToken(null);
@@ -82,7 +82,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const res = await api.get('/auth/me');
       set({ user: res.data, isLoading: false });
-    } catch (e) {
+    } catch {
       set({ user: null, isLoading: false });
     }
   },

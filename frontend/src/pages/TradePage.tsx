@@ -1,6 +1,6 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ShieldCheck, AlertCircle, CheckCircle2, TrendingUp, TrendingDown, Wallet } from 'lucide-react';
+import { ArrowLeft, AlertCircle, CheckCircle2 } from 'lucide-react';
 import api from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
 
@@ -99,7 +99,7 @@ export const TradePage: React.FC = () => {
       try {
         const meRes = await api.get('/auth/me');
         updateUserBalance(meRes.data.cash_balance);
-      } catch (err) {
+      } catch {
         // ignore
       }
     } catch (err: any) {

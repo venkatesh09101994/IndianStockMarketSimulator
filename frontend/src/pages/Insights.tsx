@@ -1,12 +1,11 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, TrendingUp, TrendingDown, ArrowUpRight, BarChart2, ShieldAlert } from 'lucide-react';
+import { TrendingUp, TrendingDown, BarChart2, ShieldAlert } from 'lucide-react';
 import api from '../api/client';
 
 export const Insights: React.FC = () => {
   const navigate = useNavigate();
   const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchInsights = async () => {
@@ -15,8 +14,6 @@ export const Insights: React.FC = () => {
         setData(res.data);
       } catch (e) {
         console.error(e);
-      } finally {
-        setLoading(false);
       }
     };
     fetchInsights();

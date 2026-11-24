@@ -3,7 +3,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Search,
   Bell,
-  LogOut,
   Wallet,
   CheckCircle2,
   TrendingUp,
@@ -30,7 +29,7 @@ interface MarketStatus {
 export const Topbar: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuthStore();
+  const { user } = useAuthStore();
   const { notifications, unreadCount, markAsRead, markAllAsRead, clearAll, addNotification } =
     useNotificationStore();
 
@@ -65,7 +64,7 @@ export const Topbar: React.FC = () => {
     try {
       const res = await api.get('/market/status');
       setMarketStatus(res.data);
-    } catch (e) {
+    } catch {
       // Calculate realistic fallback based on actual IST time
       const now = new Date();
       // IST is UTC + 5:30
@@ -133,7 +132,7 @@ export const Topbar: React.FC = () => {
           }
         }
       }
-    } catch (err) {
+    } catch {
       // ignore notification check errors
     }
   };
@@ -160,7 +159,7 @@ export const Topbar: React.FC = () => {
         const res = await api.get(`/stocks?search=${encodeURIComponent(searchQuery)}&limit=6`);
         setSearchResults(res.data);
         setShowSearchDropdown(true);
-      } catch (e) {
+      } catch {
         setSearchResults([]);
       }
     }, 200);

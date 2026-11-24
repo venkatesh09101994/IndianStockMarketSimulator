@@ -42,7 +42,7 @@ const loadSavedNotifications = (): AppNotification[] => {
       });
       return deduplicated;
     }
-  } catch (e) {
+  } catch {
     // ignore
   }
   return [
@@ -94,7 +94,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       const updated = [newNotif, ...filtered].slice(0, 50);
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      } catch (e) {
+      } catch {
         // ignore
       }
       return { notifications: updated };
@@ -108,7 +108,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       );
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      } catch (e) {
+      } catch {
         // ignore
       }
       return { notifications: updated };
@@ -120,7 +120,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       const updated = state.notifications.map((n) => ({ ...n, read: true }));
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      } catch (e) {
+      } catch {
         // ignore
       }
       return { notifications: updated };
@@ -131,7 +131,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     set({ notifications: [] });
     try {
       localStorage.removeItem(STORAGE_KEY);
-    } catch (e) {
+    } catch {
       // ignore
     }
   },

@@ -1,7 +1,7 @@
 """Dynamically onboard a stock that is not in the local seed list."""
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Optional
 from sqlalchemy.orm import Session
 from app.models.stock import Stock, LatestQuote, PriceHistory
 from app.providers import get_active_provider

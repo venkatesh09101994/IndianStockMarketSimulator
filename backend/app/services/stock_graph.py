@@ -4,7 +4,6 @@ import logging
 from typing import Dict, List, Any, Optional
 from sqlalchemy.orm import Session
 from app.models.stock import Stock, PriceHistory
-from app.models.holding import Holding
 
 logger = logging.getLogger(__name__)
 

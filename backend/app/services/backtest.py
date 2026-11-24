@@ -68,7 +68,7 @@ def run_backtest(db: Session, symbol: str, strategy: str, params: Dict[str, Any]
                 PriceHistory.stock_id == stock.id,
                 PriceHistory.interval == '1d',
             ).order_by(PriceHistory.ts.asc()).all()
-        except Exception as e:
+        except Exception:
             pass
 
     if len(candles) < 30:

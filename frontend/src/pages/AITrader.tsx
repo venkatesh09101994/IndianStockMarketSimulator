@@ -74,7 +74,7 @@ export const AITrader: React.FC = () => {
       const res = await api.get('/ai/status');
       setLatency(Math.round(performance.now() - t0));
       setStatus(res.data);
-    } catch (e) {
+    } catch {
       setStatus({ reachable: false, base_url: '', model: '' });
     }
   };
@@ -83,7 +83,9 @@ export const AITrader: React.FC = () => {
     try {
       const res = await api.get('/ai/history');
       setHistory(res.data);
-    } catch (e) {}
+    } catch {
+      // history is optional
+    }
   };
 
   useEffect(() => {

@@ -1,24 +1,20 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bookmark, Trash2, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { Bookmark, Trash2 } from 'lucide-react';
 import api from '../api/client';
 import { OrderModal } from '../components/trading/OrderModal';
 
 export const Watchlist: React.FC = () => {
   const navigate = useNavigate();
   const [items, setItems] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [selectedStock, setSelectedStock] = useState<any | null>(null);
 
   const fetchWatchlist = async () => {
     try {
-      setLoading(true);
       const res = await api.get('/watchlist');
       setItems(res.data);
     } catch (e) {
       console.error(e);
-    } finally {
-      setLoading(false);
     }
   };
 

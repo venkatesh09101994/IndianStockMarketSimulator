@@ -1,13 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Wallet,
-  TrendingUp,
-  TrendingDown,
-  Layers,
   ArrowUpRight,
   ArrowDownRight,
-  PieChart as PieIcon,
   Clock,
   Briefcase,
 } from 'lucide-react';

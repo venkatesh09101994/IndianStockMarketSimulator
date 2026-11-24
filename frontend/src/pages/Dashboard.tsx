@@ -10,7 +10,6 @@ import {
   Layers,
   ArrowRight,
   ShieldCheck,
-  ChevronRight,
 } from 'lucide-react';
 import api from '../api/client';
 import { useAuthStore } from '../store/useAuthStore';
@@ -24,13 +23,11 @@ export const Dashboard: React.FC = () => {
   const [holdings, setHoldings] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
   const [insights, setInsights] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
 
   // Position square off modal
   const [positionToSquareOff, setPositionToSquareOff] = useState<HoldingToSell | null>(null);
 
   const fetchData = async () => {
-    setLoading(true);
     try {
       const sumRes = await api.get('/portfolio/summary');
       setSummary(sumRes.data);
@@ -58,7 +55,6 @@ export const Dashboard: React.FC = () => {
     } catch (e) {
       console.error('Failed to load insights', e);
     }
-    setLoading(false);
   };
 
   useEffect(() => {

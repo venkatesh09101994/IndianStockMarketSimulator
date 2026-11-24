@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import api from './api/client';
 import { Layout } from './components/layout/Layout';
 import { Dashboard } from './pages/Dashboard';
@@ -17,8 +17,7 @@ import { Backtest } from './pages/Backtest';
 import { useAuthStore } from './store/useAuthStore';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, isLoading } = useAuthStore();
-  const location = useLocation();
+  const { isLoading } = useAuthStore();
 
   if (isLoading) {
     return (

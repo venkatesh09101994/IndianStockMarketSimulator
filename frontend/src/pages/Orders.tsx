@@ -1,22 +1,18 @@
 ﻿import React, { useState, useEffect } from 'react';
-import { ArrowLeftRight, XCircle, CheckCircle2, AlertCircle, Clock } from 'lucide-react';
+import { ArrowLeftRight } from 'lucide-react';
 import api from '../api/client';
 import { formatISTTime } from '../utils/datetime';
 
 export const Orders: React.FC = () => {
   const [orders, setOrders] = useState<any[]>([]);
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
-  const [loading, setLoading] = useState(true);
 
   const fetchOrders = async () => {
     try {
-      setLoading(true);
       const res = await api.get(`/orders${filterStatus !== 'ALL' ? `?status=${filterStatus}` : ''}`);
       setOrders(res.data);
     } catch (e) {
       console.error(e);
-    } finally {
-      setLoading(false);
     }
   };
 

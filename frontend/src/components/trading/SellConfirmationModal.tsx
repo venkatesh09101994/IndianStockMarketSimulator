@@ -95,7 +95,7 @@ export const SellConfirmationModal: React.FC<SellConfirmationModalProps> = ({
       try {
         const meRes = await api.get('/auth/me');
         updateUserBalance(meRes.data.cash_balance);
-      } catch (e) {
+      } catch {
         // ignore
       }
 

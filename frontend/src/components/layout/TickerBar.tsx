@@ -37,7 +37,7 @@ export const TickerBar: React.FC = () => {
         if (res.data && res.data.length > 0) {
           setItems(res.data);
         }
-      } catch (e) {
+      } catch {
         // fallback
       }
     };

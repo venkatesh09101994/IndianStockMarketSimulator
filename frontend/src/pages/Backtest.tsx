@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { TrendingUp } from 'lucide-react';
 import api from '../api/client';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 
 export const Backtest: React.FC = () => {
   const [symbol, setSymbol] = useState('RELIANCE');

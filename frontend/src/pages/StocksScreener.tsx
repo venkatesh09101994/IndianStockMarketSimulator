@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Filter, ArrowUpDown, Bookmark, BookmarkCheck, TrendingUp, TrendingDown } from 'lucide-react';
+import { Search, Bookmark, BookmarkCheck } from 'lucide-react';
 import api from '../api/client';
-import { useAuthStore } from '../store/useAuthStore';
 import { OrderModal } from '../components/trading/OrderModal';
 import { CompanyLogo } from '../components/common/CompanyLogo';
 import { formatISTTime, parseBackendDate, timeAgo } from '../utils/datetime';
@@ -10,12 +9,10 @@ import { formatISTTime, parseBackendDate, timeAgo } from '../utils/datetime';
 const SCR_CACHE = { search: '', selectedSector: 'All', sortKey: 'change' };
 export const StocksScreener: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
   const [stocks, setStocks] = useState<any[]>([]);
   const [search, setSearch] = useState(SCR_CACHE.search);
   const [selectedSector, setSelectedSector] = useState(SCR_CACHE.selectedSector);
   const [sortKey, setSortKey] = useState(SCR_CACHE.sortKey);
-  const [loading, setLoading] = useState(true);
   const [orderStock, setOrderStock] = useState<any | null>(null);
   const [onlineResults, setOnlineResults] = useState<any[]>([]);
   const [onlineLoading, setOnlineLoading] = useState(false);
@@ -36,7 +33,6 @@ export const StocksScreener: React.FC = () => {
 
   const fetchStocks = async () => {
     try {
-      setLoading(true);
       const res = await api.get(`/stocks?search=${encodeURIComponent(search)}&sector=${encodeURIComponent(selectedSector)}&sort=${sortKey}`);
       setStocks(res.data);
 
@@ -49,8 +45,6 @@ export const StocksScreener: React.FC = () => {
       }
     } catch (e) {
       console.error(e);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -73,7 +67,7 @@ export const StocksScreener: React.FC = () => {
         setOnlineLoading(true);
         const res = await api.get(`/stocks/search/online?q=${encodeURIComponent(search.trim())}`);
         if (!cancelled) setOnlineResults(res.data || []);
-      } catch (e) {
+      } catch {
         if (!cancelled) setOnlineResults([]);
       } finally {
         if (!cancelled) setOnlineLoading(false);
@@ -101,14 +95,6 @@ export const StocksScreener: React.FC = () => {
     } catch (err) {
       console.error(err);
     }
-  };
-
-  const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 2,
-    }).format(val);
   };
 
   return (

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, AlertCircle, CheckCircle2, ArrowRight } from 'lucide-react';
+import { X, AlertCircle, CheckCircle2 } from 'lucide-react';
 import api from '../../api/client';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useNotificationStore } from '../../store/useNotificationStore';
@@ -146,7 +146,7 @@ export const OrderModal: React.FC<OrderModalProps> = ({
       try {
         const meRes = await api.get('/auth/me');
         updateUserBalance(meRes.data.cash_balance);
-      } catch (err) {
+      } catch {
         // ignore
       }
 

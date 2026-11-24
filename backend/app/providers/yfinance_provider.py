@@ -1,6 +1,6 @@
 import math
 import logging
-from datetime import datetime, timezone
+from datetime import timezone
 from typing import Dict, List, Any
 import yfinance as yf
 import pandas as pd

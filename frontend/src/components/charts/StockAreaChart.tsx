@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+﻿import React from 'react';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -45,7 +45,6 @@ export const StockAreaChart: React.FC<StockAreaChartProps> = ({
   onRangeChange,
   loading = false,
 }) => {
-  const [chartMode, setChartMode] = useState<'area' | 'line'>('area');
   const timeframes = ['1D', '7D', '1M', '6M', '1Y', 'ALL'];
 
   // Format data safely
